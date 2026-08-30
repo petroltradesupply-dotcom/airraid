@@ -406,10 +406,28 @@ function applyHeading(el, rot, threat) {
   el.classList.toggle('threat--noheading', heading === null);
 }
 
+/* "22:16" makes the reader do arithmetic, at night, to answer the only question that
+ * matters about a track: how old is this. So the popup says the answer instead. */
+function pluralUk(n, one, few, many) {
+  const mod10 = n % 10, mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+function agoText(date) {
+  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (seconds < 45) return 'щойно';
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} ${pluralUk(minutes, 'хвилину', 'хвилини', 'хвилин')} тому`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} ${pluralUk(hours, 'годину', 'години', 'годин')} тому`;
+}
+
 function showPopup(threat) {
   const when = threat.updatedAt ? new Date(threat.updatedAt) : null;
   const parts = [threat.locality, threat.district, threat.region].filter(Boolean);
-  new maplibregl.Popup({ offset: 14, closeButton: false })
+  const popup = new maplibregl.Popup({ offset: 14, closeButton: false })
     .setLngLat([threat.lon, threat.lat])
     .setHTML(
       `<div class="popup__type">${TYPE_LABEL[threat.type] || threat.type}</div>` +
@@ -421,11 +439,22 @@ function showPopup(threat) {
           : ` · швидкість орієнтовна (${REFERENCE_KMH[threat.type] ?? 150} км/год)`) +
         `</div>`) +
       `<div class="popup__meta">${escapeHtml(parts.join(' · '))}` +
-      (when ? ` · ${when.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}` : '') +
+      (when ? ` · <span class="popup__ago">${agoText(when)}</span>` : '') +
       (threat.sourceCount ? ` · підтверджень: ${threat.sourceCount}` : '') +
       `</div>`,
     )
     .addTo(map);
+
+  /* A popup left open would otherwise keep claiming "2 хвилини тому" indefinitely, which
+   * is worse than the clock it replaced: a wrong relative time reads as fresh. */
+  if (when) {
+    const tick = setInterval(() => {
+      const span = popup.getElement()?.querySelector('.popup__ago');
+      if (!span) { clearInterval(tick); return; }
+      span.textContent = agoText(when);
+    }, 15000);
+    popup.on('close', () => clearInterval(tick));
+  }
 }
 
 /** Degrees to the eight-point compass, because "на південний захід" is read faster than
