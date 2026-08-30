@@ -424,7 +424,28 @@ function agoText(date) {
   return `${hours} ${pluralUk(hours, 'годину', 'години', 'годин')} тому`;
 }
 
+/* Exactly one popup at a time, and it closes itself.
+ *
+ * Both rules exist because of how this is actually used: a phone, at night, tapping
+ * tracks near Kyiv one after another. Without the first rule every tap left its popup
+ * behind and the map disappeared under a stack of them. Without the second, a popup
+ * opened by accident stays until it is deliberately dismissed - and on a phone the
+ * dismiss target is the map itself, which is what you are trying to look at. */
+/* Twelve seconds: about 26 words across four fields, scanned rather than read, at the
+ * ~2 words/second that structured text actually goes at - plus a second to find the popup
+ * after the tap. Rounded up on purpose, because the two mistakes do not cost the same. Too
+ * long and the next tap dismisses it anyway; too short and you are hunting a 26-pixel
+ * marker again, at night, one-handed. */
+const POPUP_LIFETIME_MS = 12000;
+let activePopup = null;
+
+function closePopup() {
+  if (activePopup) activePopup.remove();     // fires 'close', which clears the timers
+}
+
 function showPopup(threat) {
+  closePopup();
+
   const when = threat.updatedAt ? new Date(threat.updatedAt) : null;
   const parts = [threat.locality, threat.district, threat.region].filter(Boolean);
   const popup = new maplibregl.Popup({ offset: 14, closeButton: false })
@@ -445,16 +466,31 @@ function showPopup(threat) {
     )
     .addTo(map);
 
+  activePopup = popup;
+
   /* A popup left open would otherwise keep claiming "2 хвилини тому" indefinitely, which
    * is worse than the clock it replaced: a wrong relative time reads as fresh. */
-  if (when) {
-    const tick = setInterval(() => {
-      const span = popup.getElement()?.querySelector('.popup__ago');
-      if (!span) { clearInterval(tick); return; }
-      span.textContent = agoText(when);
-    }, 15000);
-    popup.on('close', () => clearInterval(tick));
-  }
+  const tick = when ? setInterval(() => {
+    const span = popup.getElement()?.querySelector('.popup__ago');
+    if (span) span.textContent = agoText(when);
+  }, 15000) : null;
+
+  let dismiss = null;
+  const restart = () => {
+    clearTimeout(dismiss);
+    dismiss = setTimeout(() => popup.remove(), POPUP_LIFETIME_MS);
+  };
+  restart();
+
+  /* Touching the popup means it is being read - start the countdown over rather than
+   * pulling it away mid-sentence. */
+  popup.getElement()?.addEventListener('pointerdown', restart);
+
+  popup.on('close', () => {
+    clearTimeout(dismiss);
+    if (tick) clearInterval(tick);
+    if (activePopup === popup) activePopup = null;
+  });
 }
 
 /** Degrees to the eight-point compass, because "на південний захід" is read faster than
