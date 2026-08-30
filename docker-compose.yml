@@ -1,0 +1,52 @@
+# Air Raid — the map page.
+#
+# Deliberately a project of its own: its own directory, its own compose project name, its
+# own port, its own container. Nothing here touches the reverse proxy or any other service
+# on the host, so bringing it up or tearing it down cannot affect anything that was
+# already running.
+#
+#     docker compose -p airraid up -d
+#     docker compose -p airraid down
+#
+# nginx:1.27-alpine is already present on the host (another project uses it), so this
+# pulls nothing.
+services:
+  web:
+    image: nginx:1.27-alpine
+    container_name: airraid-web
+    restart: unless-stopped
+    # No published ports at all. Caddy reaches this container by name over the `edge`
+    # network, so nothing needs to be exposed on the host - the only way in is
+    # https://airraid.pp.ua, and the host's own firewall surface stays unchanged.
+    volumes:
+      # The page itself: read-only, because a web server has no business writing to it.
+      - ./web:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      # Where the alert daemon writes status.json. Read-only, and the ONLY coupling to
+      # that daemon: it writes, the page reads, and no HTTP request can reach the process
+      # whose job is to wake someone at night. Point STATUS_DIR at the daemon's output
+      # directory in a .env beside this file; leave it unset and the page simply reports
+      # that the verdict is unavailable.
+      - ${STATUS_DIR:-./status}:/usr/share/nginx/html/live:ro
+    # `edge` is an existing external network shared with the reverse proxy in front;
+    # joining it is what lets the proxy resolve `airraid-web` by name and serve the site
+    # on 443 without a port in the address. `default` stays so the project keeps a
+    # network of its own. Remove both this and the status mount above to run standalone.
+    networks:
+      - default
+      - edge
+
+    # A static file server needs very little; capping it means a runaway page cannot
+    # starve the alert daemon sharing the host.
+    mem_limit: 128m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+networks:
+  # Owned by the reverse proxy's own compose project, not this one; declared external so
+  # bringing this project down never removes it.
+  edge:
+    external: true

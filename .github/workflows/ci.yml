@@ -1,0 +1,29 @@
+# The page is static, so there is no test suite to run - but three things about it can
+# break silently, and every one of them has. The checker guards those; this workflow makes
+# sure nobody merges past it.
+name: ci
+
+# Every push, on every branch, plus every pull request. A check that only runs on main
+# tells you about a break after it is already on main.
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Syntax only. The page has no build step and no bundler on purpose: one file the
+      # browser reads directly is far easier to debug at three in the morning than a
+      # sourcemap.
+      - name: JavaScript parses
+        run: node --check web/app.js
+
+      - name: Page is intact
+        run: python3 tools/check_web.py

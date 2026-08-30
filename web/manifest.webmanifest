@@ -1,0 +1,19 @@
+{
+  "name": "Air Raid",
+  "short_name": "Air Raid",
+  "description": "Балістична загроза для Києва та карта повітряних цілей",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#11131f",
+  "theme_color": "#11131f",
+  "lang": "uk",
+  "dir": "ltr",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

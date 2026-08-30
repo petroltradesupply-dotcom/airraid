@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover lets the page paint under the notch; the CSS then pads content
+     back out with env(safe-area-inset-*). Without it a standalone iOS app has a dead
+     white strip at the top. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Air Raid</title>
+
+<!-- Standalone display on iOS. iOS ignores the manifest for home-screen launches, so
+     these three tags are what actually remove the browser chrome. -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- black, NOT black-translucent.
+     Measured on an installed app: with black-translucent iOS starts the page at y=0, under
+     the status bar, but still sizes the viewport as if the status bar were reserved -
+     screen 912, innerHeight 844, and safe-area-inset-top exactly 68. The 68 taken at the
+     top reappeared as an unpainted black band at the bottom. With `black` the viewport
+     begins below the status bar and reaches the bottom edge. -->
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Air Raid">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#11131f">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+<link rel="manifest" href="manifest.webmanifest?v=557b2cbd">
+
+<link rel="stylesheet" href="maplibre-gl.css">
+<link rel="stylesheet" href="style.css?v=aa97f820">
+</head>
+<body>
+
+<!-- The status bar answers the only question that matters at 3 a.m., before the map has
+     even finished loading. -->
+<header id="status" class="status status--unknown">
+  <div class="status__main">
+    <div class="status__headline" id="headline">Завантаження…</div>
+    <div class="status__reason" id="reason">з'єднання з сервісом</div>
+  </div>
+  <div class="status__meta">
+    <div class="status__row"><span class="status__label">Київ</span><span id="kyiv">—</span></div>
+    <div class="status__row"><span class="status__label">Область</span><span id="oblast">—</span></div>
+    <div class="status__row"><span class="status__label">Цілі</span><span id="counts">—</span></div>
+    <div class="status__row status__row--muted"><span class="status__label">Дані</span><span id="freshness">—</span></div>
+  </div>
+
+  <!-- Legend doubles as a filter: tapping a class hides it. Ballistic is first and stays
+       loudest, because separating it from drones is the entire point of the service.
+       It lives inside the status panel so that on wide screens it can sit in the grey
+       column rather than on top of the map. -->
+  <nav id="legend" class="legend" aria-label="Типи цілей"></nav>
+</header>
+
+<main id="map"></main>
+
+<button id="recenter" class="recenter" title="До Києва" aria-label="До Києва">
+  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+    <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/>
+    <circle cx="12" cy="12" r="2" fill="currentColor"/>
+    <path d="M12 1v3M12 20v3M1 12h3M20 12h3" stroke="currentColor" stroke-width="2"/>
+  </svg>
+</button>
+
+<footer class="attrib">
+  <a href="https://neptun.in.ua/" target="_blank" rel="noopener">NEPTUN</a> ·
+  © OpenStreetMap · не заміняє офіційну тривогу
+</footer>
+
+<script src="maplibre-gl.js"></script>
+<script src="app.js?v=5d70addc"></script>
+</body>
+</html>

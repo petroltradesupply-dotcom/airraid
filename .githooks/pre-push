@@ -1,0 +1,21 @@
+#!/bin/sh
+# Two gates, and the order matters: nothing that must not be published gets checked for
+# correctness first.
+#
+# Enable once per clone (hooks are not versioned by git, the path to them is):
+#
+#     git config core.hooksPath .githooks
+#
+set -e
+
+SCANNER="$HOME/.claude/skills/pre-push-privacy/scan.py"
+if [ -f "$SCANNER" ]; then
+    echo "pre-push: перевіряю на персональні дані…"
+    python3 "$SCANNER" .
+else
+    echo "pre-push: сканера приватності немає, пропускаю" >&2
+fi
+
+echo "pre-push: перевіряю сторінку…"
+node --check web/app.js
+python3 tools/check_web.py

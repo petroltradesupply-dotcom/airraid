@@ -1,0 +1,10 @@
+# Written by the alert daemon at runtime, mounted into the container read-only.
+web/live/
+
+# Local TLS material, if the deployment ever needs an origin certificate again.
+certs/
+.env
+
+__pycache__/
+*.pyc
+.DS_Store

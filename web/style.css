@@ -1,0 +1,340 @@
+/* Air Raid.
+ *
+ * One layout for every screen rather than a phone version and a desktop version: the
+ * status bar sits above the map when the viewport is tall, beside it when it is wide.
+ * Nothing here is phone-only or desktop-only.
+ *
+ * The palette is the map's, so the interface reads as part of the map rather than as a
+ * panel bolted on top.
+ */
+
+:root {
+  --ground: #1b1f31;
+  --ground-deep: #11131f;
+  --panel: #191d2e;
+  --line: #2a3049;
+  --text: #e6e9f2;
+  --text-dim: #8990a6;
+
+  --alarm: #ff2d55;
+  --watch: #ffb02e;
+  --calm: #3ddc84;
+  --unknown: #6b7a99;
+
+  --ballistic: #ff2d55;
+  --missile: #ff8a3d;
+  --aviation: #a06cff;
+  --kab: #e0603a;
+  --drone: #6b7a99;
+  --recon: #3d7fa8;
+
+  /* Safe areas. With the status bar reserved by iOS these are 0 at the top in portrait,
+     but they still matter in landscape and for the home indicator, so they stay. */
+  --top: env(safe-area-inset-top, 0px);
+  --bottom: env(safe-area-inset-bottom, 0px);
+  --left: env(safe-area-inset-left, 0px);
+  --right: env(safe-area-inset-right, 0px);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ground-deep);
+  color: var(--text);
+  font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* A map you drag should not also bounce the page. */
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  /* Pinned to the visual viewport rather than sized in viewport units. Installed on an
+     iPhone home screen, `100dvh` left a black band along the bottom: in standalone mode
+     the value does not always resolve to the full screen, and whatever the page does not
+     cover shows through as the app background. `inset: 0` cannot be short. */
+  position: fixed;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  grid-template-areas: "status" "map";
+}
+
+/* ------------------------------------------------------------------ status bar */
+.status {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: calc(var(--top) + 12px) calc(var(--right) + 16px) 12px calc(var(--left) + 16px);
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  /* The left edge carries the state as colour, so the answer is visible before a single
+     word is read. */
+  border-left: 4px solid var(--unknown);
+  transition: border-color .3s ease;
+}
+
+.status--alarm   { border-left-color: var(--alarm); background: linear-gradient(90deg, rgba(255,45,85,.14), var(--panel) 55%); }
+.status--watch   { border-left-color: var(--watch); background: linear-gradient(90deg, rgba(255,176,46,.10), var(--panel) 55%); }
+/* An ordinary alert with nothing ballistic behind it: red, because a siren is running,
+   but flat - no wash, no pulse. Those belong to the ballistic states, which are rare and
+   have to stay distinguishable from the eleven ordinary alerts a week. */
+.status--alert   { border-left-color: var(--alarm); }
+.status--calm    { border-left-color: var(--calm); }
+.status--unknown { border-left-color: var(--unknown); }
+
+.status__main { flex: 1 1 auto; min-width: 0; }
+
+.status__headline {
+  font-size: clamp(17px, 4.5vw, 24px);
+  font-weight: 650;
+  letter-spacing: -.01em;
+  line-height: 1.15;
+}
+/* The headline states whether Kyiv is under an alert, so its colour tracks that and
+   nothing else - the engine can be armed with no Kyiv alert at all. */
+.status__headline--alert   { color: var(--alarm); }
+.status__headline--calm    { color: var(--calm); }
+.status__headline--unknown { color: var(--text); }
+@keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: .55 } }
+
+.status__reason {
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: 13px;
+  /* Two lines maximum: a reason that needs a paragraph is not a reason you can act on. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* An alarm should be impossible to mistake for anything else, including at a glance
+   from across a dark room. Only this line pulses; the headline stays still so the two
+   never compete. */
+.status__reason--alarm {
+  color: var(--alarm);
+  font-weight: 650;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.status__reason--watch { color: var(--watch); font-weight: 600; }
+/* What is over the city: ordinary white, because it is information, not a warning. */
+.status__reason--info  { color: var(--text); }
+
+.status__meta {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 10px;
+  font-size: 12px;
+  text-align: right;
+}
+.status__row { display: contents; }
+.status__label { color: var(--text-dim); text-align: left; }
+.status__row--muted span { color: var(--text-dim); }
+
+/* Narrow phones: the meta grid steals room the headline needs. */
+@media (max-width: 430px) {
+  .status { gap: 10px; padding-right: calc(var(--right) + 12px); }
+  .status__meta { font-size: 11px; gap: 1px 8px; }
+}
+@media (max-width: 340px) {
+  .status__meta { display: none; }
+}
+
+/* Wide screens: the bar becomes a column beside the map, so the map keeps its height. */
+@media (min-width: 900px) and (min-height: 500px) {
+  body {
+    grid-template-columns: 340px 1fr;
+    grid-template-rows: 1fr;
+    grid-template-areas: "status map";
+  }
+  .status {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 20px;
+    border-bottom: none;
+    border-right: 1px solid var(--line);
+    padding: calc(var(--top) + 24px) 20px 20px;
+  }
+  .status__meta { text-align: left; font-size: 13px; }
+  .status__headline { font-size: 26px; }
+  .status__reason { -webkit-line-clamp: 4; font-size: 14px; }
+  .status__main { flex: 0 0 auto; }
+  /* A very long reason plus seven legend rows can outgrow a 500px-tall window; scrolling
+     the column is better than letting it spill over the map. */
+  .status { overflow-y: auto; }
+
+  .attrib { padding-left: calc(340px + 10px); }
+}
+
+/* Landscape phone: almost no vertical room, so the bar collapses to one line. */
+@media (max-height: 450px) and (orientation: landscape) {
+  .status { padding-top: calc(var(--top) + 6px); padding-bottom: 6px; }
+  .status__headline { font-size: 16px; }
+  .status__reason { display: none; }
+}
+
+/* ------------------------------------------------------------------------- map */
+#map { grid-area: map; width: 100%; height: 100%; background: var(--ground); }
+
+.maplibregl-ctrl-attrib,
+.maplibregl-ctrl-logo { display: none !important; }
+
+/* Threat markers. Each is an inline SVG silhouette rather than a coloured dot: on a map
+   that carries six classes at once, shape is what lets them be told apart without a
+   legend, and colour then only has to reinforce it.
+
+   DOM elements rather than a symbol layer, so each keeps its own animation without a
+   sprite sheet, and so the same drawing serves the legend. */
+.threat {
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  will-change: transform;
+  /* A dark outline keeps every silhouette readable over pale roads and water. */
+  filter: drop-shadow(0 0 1.5px rgba(17,19,31,.95)) drop-shadow(0 1px 2px rgba(0,0,0,.5));
+}
+.threat svg { display: block; }
+
+/* The rotation layer. Separate from .threat so the ballistic pulse can animate scale on
+   the parent without the two overwriting each other's transform. */
+.threat__rot { display: grid; place-items: center; transition: transform .4s ease-out; }
+
+/* Moving on a reference speed rather than a reported one. Shown by weight alone: an
+   earlier attempt drew a dashed ring with `inset`, which against a zero-size marker box
+   resolved into lines across the whole map. */
+.threat--estimated { opacity: .78; }
+
+/* No reported course: the drawing stays upright, and this says so rather than letting
+   "north" pass for a measurement. */
+.threat--noheading { opacity: .55; }
+.threat--noheading .threat__rot { transform: none !important; }
+
+.threat--uav, .threat--fpv, .threat--recon, .threat--unknown { opacity: .88; }
+
+/* Ballistic is the one class that means move, so it is the one class that pulses. */
+.threat--ballistic { animation: ping 1.5s ease-out infinite; }
+@keyframes ping {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(255,45,85,.9)); }
+  50%      { transform: scale(1.12); filter: drop-shadow(0 0 7px rgba(255,45,85,.75)); }
+}
+
+/* A stale track is still shown - vanishing it would silently lose information - but
+   hollowed out so it cannot be mistaken for a live one. */
+.threat--stale { opacity: .35; filter: grayscale(.6); animation: none; }
+
+.maplibregl-popup-content {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5);
+}
+.maplibregl-popup-tip { border-top-color: var(--panel) !important; border-bottom-color: var(--panel) !important; }
+.popup__type { font-weight: 650; margin-bottom: 2px; }
+.popup__meta { color: var(--text-dim); font-size: 12px; }
+
+/* ---------------------------------------------------------------------- legend */
+.legend {
+  position: fixed;
+  left: calc(var(--left) + 10px);
+  right: calc(var(--right) + 62px);   /* clear of the recentre button */
+  /* Sits directly on top of the attribution line, which itself hugs the bottom edge. */
+  bottom: calc(var(--bottom) + 22px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  z-index: 5;
+}
+.legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: rgba(25,29,46,.86);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  backdrop-filter: blur(8px);
+}
+.legend__item[aria-pressed="true"] { color: var(--text); }
+.legend__item[aria-pressed="false"] { opacity: .4; }
+.legend__icon { display: grid; place-items: center; width: 15px; height: 15px; flex: 0 0 auto; }
+.legend__icon svg { display: block; }
+.legend__count { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+/* Wide screens: the legend stops floating over the map and becomes the bottom of the
+   status column. This block has to live *below* the base rules above, not up in the
+   layout media query - same specificity, so the later declaration wins. */
+@media (min-width: 900px) and (min-height: 500px) {
+  .legend {
+    position: static;
+    left: auto; right: auto; bottom: auto;
+    margin-top: auto;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  .legend__item {
+    width: 100%;
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: rgba(25,29,46,.55);
+  }
+  /* Counts line up on the right edge of the column, like a table. */
+  .legend__count { margin-left: auto; }
+}
+
+/* -------------------------------------------------------------------- controls */
+.recenter {
+  position: fixed;
+  right: calc(var(--right) + 10px);
+  bottom: calc(var(--bottom) + 22px);
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: rgba(25,29,46,.86);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  z-index: 5;
+}
+.recenter:active { background: var(--line); }
+
+.attrib {
+  position: fixed;
+  left: 0; right: 0;
+  bottom: 0;
+  /* One line, hard against the bottom edge. Two wrapped lines of small print were eating
+     a strip of map for no benefit. */
+  padding: 3px calc(var(--right) + 8px) calc(var(--bottom) + 3px) calc(var(--left) + 8px);
+  background: linear-gradient(transparent, rgba(17,19,31,.92) 55%);
+  color: var(--text-dim);
+  font-size: 9.5px;
+  line-height: 1.3;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  z-index: 4;
+}
+.attrib a { color: var(--text-dim); pointer-events: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .status__reason--alarm,
+  .threat--ballistic { animation: none; }
+}
