@@ -43,11 +43,11 @@ const KYIV = [30.5234, 50.4501];
 const ALERT_RED = '#ff3b30';
 const ALERT_FILL = 0.22;
 
-/* The panel keeps its own red, --alarm #ff2d55, and so does the Балістика legend icon. Not
- * an oversight and not drift: they were looked at side by side against this fill and kept
- * deliberately. They are type and iconography at full opacity, where the pink crimson is
- * sharp and reads well; this is a wash over a map, where the same hue goes cherry. Two reds
- * with two jobs - do not "fix" one to match the other without looking at both. */
+/* This is THE red of the application, not just the map's. --alarm and --ballistic in
+ * style.css are the same value, and the legend icon below reads this constant. One red,
+ * because the difference between two of them named nothing a reader could point at, and
+ * because two tokens drift - these two map fills were separate literals and had already
+ * drifted apart, the oblast painting weaker than a raion inside it. */
 
 const UKRAINE_BOUNDS = [[22.14, 44.39], [40.23, 52.37]];
 
@@ -196,7 +196,7 @@ const ICON_FOR = {
 };
 
 const TYPES = [
-  { key: 'ballistic', label: 'Балістика', colour: '#ff2d55' },
+  { key: 'ballistic', label: 'Балістика', colour: ALERT_RED },
   { key: 'missile',   label: 'Ракети',    colour: '#ff8a3d' },
   { key: 'kab',       label: 'КАБ',       colour: '#e0603a' },
   { key: 'mig31k',    label: 'Авіація',   colour: '#a06cff' },

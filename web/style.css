@@ -16,12 +16,16 @@
   --text: #e6e9f2;
   --text-dim: #8990a6;
 
-  --alarm: #ff2d55;
+  /* One red for the whole application. #ff3b30 rather than the former pink crimson
+     #ff2d55, because the map has to wash it over a dark ground at low opacity and there
+     the pink went cherry - and a second red would have meant nothing a reader could
+     name. The rgba() literals below are this same colour; keep them in step. */
+  --alarm: #ff3b30;
   --watch: #ffb02e;
   --calm: #3ddc84;
   --unknown: #6b7a99;
 
-  --ballistic: #ff2d55;
+  --ballistic: #ff3b30;   /* same red as --alarm, on purpose */
   --missile: #ff8a3d;
   --aviation: #a06cff;
   --kab: #e0603a;
@@ -79,7 +83,7 @@ body {
   transition: border-color .3s ease;
 }
 
-.status--alarm   { border-left-color: var(--alarm); background: linear-gradient(90deg, rgba(255,45,85,.14), var(--panel) 55%); }
+.status--alarm   { border-left-color: var(--alarm); background: linear-gradient(90deg, rgba(255,59,48,.14), var(--panel) 55%); }
 .status--watch   { border-left-color: var(--watch); background: linear-gradient(90deg, rgba(255,176,46,.10), var(--panel) 55%); }
 /* An ordinary alert with nothing ballistic behind it: red, because a siren is running,
    but flat - no wash, no pulse. Those belong to the ballistic states, which are rare and
@@ -230,8 +234,8 @@ body {
 /* Ballistic is the one class that means move, so it is the one class that pulses. */
 .threat--ballistic { animation: ping 1.5s ease-out infinite; }
 @keyframes ping {
-  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(255,45,85,.9)); }
-  50%      { transform: scale(1.12); filter: drop-shadow(0 0 7px rgba(255,45,85,.75)); }
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(255,59,48,.9)); }
+  50%      { transform: scale(1.12); filter: drop-shadow(0 0 7px rgba(255,59,48,.75)); }
 }
 
 /* A stale track is still shown - vanishing it would silently lose information - but
@@ -419,7 +423,7 @@ body {
   cursor: pointer;
 }
 .sheet__item:active { background: var(--line); }
-.sheet__item--on { background: rgba(255,45,85,.12); }
+.sheet__item--on { background: rgba(255,59,48,.12); }
 .sheet__where { color: var(--text-dim); font-size: 12px; }
 .sheet__alert { margin-left: auto; color: var(--alarm); font-size: 12px; }
 
