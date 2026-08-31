@@ -251,7 +251,7 @@ const map = new maplibregl.Map({
    * index.html, and nginx caches .geojson for a day - so a regenerated boundary or mask
    * would sit invisible behind the cache. tools/check_web.py verifies these hashes too,
    * which is the only reason they can be trusted to be right. */
-  style: 'map-style.json?v=457dfc20',
+  style: 'map-style.json?v=daf69b5f',
   /* Fitted to the country, not centred on the reader's place. The place drives the status
    * line and the "to me" button; the opening view is meant to answer "what is happening"
    * before "what is happening to me". */
