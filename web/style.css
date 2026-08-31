@@ -130,14 +130,26 @@ body {
 /* What is over the city: ordinary white, because it is information, not a warning. */
 .status__reason--info  { color: var(--text); }
 
+/* Fixed width, and that is the whole point of it.
+ *
+ * With `auto auto` columns this block sized itself to its longest row, so a value growing -
+ * "перепідключення…" appearing, or the ballistic tally joining the target count - stole width
+ * from the headline beside it and made "Тривога в Бучанському районі" break at a different
+ * word. The same sentence jumping between renders, for a reason invisible on screen.
+ *
+ * The label column takes what is left and truncates if it must: a long settlement name is
+ * spelled out in full in the headline right next to it and again in the settings sheet, so
+ * an ellipsis here costs nothing. The headline's width never moves. */
 .status__meta {
   flex: 0 0 auto;
+  width: 152px;
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 2px 10px;
   font-size: 12px;
   text-align: right;
 }
+.status__meta > .status__row > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status__row { display: contents; }
 /* `hidden` alone does nothing here: the browser implements it as `display: none` in its own
    stylesheet, and any author rule - including `display: contents` above - outranks that.
@@ -149,7 +161,7 @@ body {
 /* Narrow phones: the meta grid steals room the headline needs. */
 @media (max-width: 430px) {
   .status { gap: 10px; padding-right: calc(var(--right) + 12px); }
-  .status__meta { font-size: 11px; gap: 1px 8px; }
+  .status__meta { width: 138px; font-size: 11px; gap: 1px 8px; }
 }
 @media (max-width: 340px) {
   .status__meta { display: none; }
@@ -226,8 +238,14 @@ body {
 
 /* No reported course: the drawing stays upright, and this says so rather than letting
    "north" pass for a measurement. */
-.threat--noheading { opacity: .55; }
-.threat--noheading .threat__rot { transform: none !important; }
+/* Two separate statements, and fusing them into one class made a fix silently inert.
+ *
+ * `--unmeasured` says nobody reported this track's course, so it is dimmed. `--upright` says
+ * the glyph gets no rotation at all. They used to be the same class, and the `!important`
+ * that pinned the rotation to none then overrode the inward heading a KAB is given from its
+ * class - the inline style read `rotate(254deg)` while the computed value was `none`. */
+.threat--unmeasured { opacity: .55; }
+.threat--upright .threat__rot { transform: none !important; }
 
 .threat--uav, .threat--fpv, .threat--recon, .threat--unknown { opacity: .88; }
 

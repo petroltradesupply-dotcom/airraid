@@ -760,15 +760,55 @@ function markerElement(threat) {
   return el;
 }
 
+/* The centroid of Ukraine's own area, computed from web/oblasts.geojson rather than looked
+ * up: 49.0153 N, 31.3914 E. It lands inside the country and within a couple of kilometres
+ * of the official geographic centre near Dobrovelychkivka, which is a useful check that the
+ * number is not nonsense. */
+const UKRAINE_CENTRE = [31.3914, 49.0153];
+
+/* Classes that never report a course, and for which "no course" still has a direction.
+ *
+ * A guided bomb is released by an aircraft on the far side of the border and glides INWARD;
+ * it cannot fly out of the country. Neptun reports no heading for the class at all - checked
+ * live, all six KAB tracks carried heading: null - and with no rotation the glyph kept the
+ * orientation it was drawn in, which is north. From Kharkiv that reads as a bomb flying into
+ * Russia, which is not a small cosmetic complaint: it is the map stating the opposite of
+ * what is happening.
+ *
+ * So the glyph is turned toward the centre of the country. That is a statement about the
+ * class, not a measurement of the track, and it stays out of `predict()` - the marker still
+ * does not MOVE, because inventing motion would put the icon somewhere nobody reported. The
+ * dimming that marks an unmeasured course stays too, and the popup still prints no course
+ * line. */
+const INWARD_TYPES = new Set(['kab']);
+
+/** Initial bearing from one point to another, degrees clockwise from north. */
+function bearingTo(fromLon, fromLat, toLon, toLat) {
+  const φ1 = fromLat * Math.PI / 180, φ2 = toLat * Math.PI / 180;
+  const Δλ = (toLon - fromLon) * Math.PI / 180;
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
 /** Point the marker along the track's course.
  *
  * Icons are drawn pointing north, so the rotation IS the compass heading. A track with no
  * reported course keeps the drawing upright and is marked, so "north" is never mistaken
- * for a measurement. */
+ * for a measurement - unless its class only ever flies one way, see INWARD_TYPES. */
 function applyHeading(el, rot, threat) {
   const heading = headingOf(threat);
-  rot.style.transform = heading === null ? '' : `rotate(${heading}deg)`;
-  el.classList.toggle('threat--noheading', heading === null);
+  let shown = heading;
+  if (shown === null && INWARD_TYPES.has(threat.type)
+      && Number.isFinite(threat.lon) && Number.isFinite(threat.lat)) {
+    shown = bearingTo(threat.lon, threat.lat, UKRAINE_CENTRE[0], UKRAINE_CENTRE[1]);
+  }
+  rot.style.transform = shown === null ? '' : `rotate(${shown}deg)`;
+  /* Dimming is keyed on the REPORTED course - "nobody measured this" stays true even when
+   * the class tells us which way it must be going. The upright pin is keyed on the DRAWN
+   * one, so an inward heading is not overridden by it. */
+  el.classList.toggle('threat--unmeasured', heading === null);
+  el.classList.toggle('threat--upright', shown === null);
 }
 
 /* "22:16" makes the reader do arithmetic, at night, to answer the only question that
@@ -813,8 +853,16 @@ function showPopup(threat) {
 
   const when = threat.updatedAt ? new Date(threat.updatedAt) : null;
   const parts = [threat.locality, threat.district, threat.region].filter(Boolean);
+  /* Anchored where the MARKER is, not where the report was.
+   *
+   * `predict()` projects a moving track forward from the moment it was last confirmed, so
+   * the marker is ahead of `threat.lon/lat` by however far it has flown since - fifteen
+   * kilometres for a drone reported five minutes ago at 180 km/h. Anchoring the popup to
+   * the raw report put it that far from the icon that was tapped, and because both are
+   * geographic the gap grew in pixels as the map zoomed in. */
+  const at = predict(threat, Date.now());
   const popup = new maplibregl.Popup({ offset: 14, closeButton: false })
-    .setLngLat([threat.lon, threat.lat])
+    .setLngLat([at.lon, at.lat])
     .setHTML(
       `<div class="popup__type">${TYPE_LABEL[threat.type] || threat.type}</div>` +
       `<div>${escapeHtml(threat.explanationShort || threat.title || '')}</div>` +
@@ -963,11 +1011,21 @@ function updateLegend(counts) {
   }
 }
 
+/* The ballistic tally gets its own row rather than being appended to the total.
+ *
+ * Appended, it made the meta column wider whenever it appeared, the headline column
+ * narrower by the same amount, and "Тривога в Бучанському районі" re-wrap to a different
+ * line - the same words jumping between renders for no reason the reader can see. A row
+ * changes the block's height, which nothing else depends on; a longer value changes its
+ * width, which the headline does. */
 function updateCounts(counts) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const ballistic = counts.ballistic || 0;
-  document.getElementById('counts').textContent =
-    ballistic ? `${total} · балістика ${ballistic}` : String(total);
+  document.getElementById('counts').textContent = String(total);
+  const row = document.getElementById('ballistic-row');
+  const cell = document.getElementById('ballistic-count');
+  if (cell) cell.textContent = ballistic ? String(ballistic) : '';
+  if (row) row.hidden = !ballistic;
 }
 
 /* ------------------------------------------------------------------ live feed */
@@ -1243,7 +1301,7 @@ function paintStatus() {
   el.freshness.textContent =
     socketState === 'live' && feedAge !== null && feedAge < 120 ? 'онлайн'
     : socketState === 'live' ? `${Math.round((feedAge ?? 0) / 60)} хв тому`
-    : socketState === 'reconnecting' ? 'перепідключення…'
+    : socketState === 'reconnecting' ? 'зв\'язок…'
     : 'з\'єднання…';
 }
 
