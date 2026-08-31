@@ -289,12 +289,63 @@ for (const ev of ['dragstart', 'zoomstart', 'rotatestart']) {
   map.on(ev, () => { fitUntilTouched = false; });
 }
 
-function fitUkraine() {
-  map.resize();
+/* How far past the country view a reader may pan, as a fraction of the fitted view on each
+ * side. 0.2 means a fifth of a screen in any direction: enough to nudge Odesa or Kharkiv off
+ * the edge for a closer look, not enough to lose the country.
+ *
+ * A limit is needed at all because the base map is the whole world. One careless swipe on a
+ * phone sent the country off-screen, and getting back meant zooming out, recognising Spain,
+ * and panning east - which is not something to do while deciding whether to go to a shelter.
+ *
+ * The bound is 20 % of the VIEW, not a fixed number of kilometres, and that is the part that
+ * had to be measured rather than guessed. A fixed margin clamps the zoom: with Ukraine plus
+ * 300 km as hard limits, MapLibre refuses to zoom out far enough to fit the country on a
+ * portrait phone and cuts the north and south off. Measured on five viewports, every fixed
+ * margin up to ~600 km did this on at least one of them, and the tall portrait phone is
+ * always the binding case. Deriving the limit from the fitted view cannot clamp it, because
+ * the fitted view is inside the limit by construction. */
+const PAN_ALLOWANCE = 0.2;
+
+/* The pan limit, recomputed for the current viewport. Never moves the camera: the fit runs
+ * with the limit cleared and the previous camera is put back in the same tick, so nothing
+ * renders in between and the reader sees no jump. */
+function refreshPanLimits() {
+  const camera = { center: map.getCenter(), zoom: map.getZoom() };
+  map.setMaxBounds(null);
   map.fitBounds(UKRAINE_BOUNDS, { padding: fitPadding(), animate: false });
+  const view = map.getBounds();
+  map.jumpTo(camera);
+
+  const dx = (view.getEast() - view.getWest()) * PAN_ALLOWANCE;
+  const dy = (view.getNorth() - view.getSouth()) * PAN_ALLOWANCE;
+  map.setMaxBounds([
+    [view.getWest() - dx, view.getSouth() - dy],
+    [view.getEast() + dx, view.getNorth() + dy],
+  ]);
 }
 
-addEventListener('resize', () => { if (fitUntilTouched) fitUkraine(); });
+function fitUkraine() {
+  map.resize();
+  /* Cleared first, or the limit set on the previous pass clamps this fit - which on a
+   * portrait phone means the country no longer fits on screen. */
+  map.setMaxBounds(null);
+  map.fitBounds(UKRAINE_BOUNDS, { padding: fitPadding(), animate: false });
+  const view = map.getBounds();
+  const dx = (view.getEast() - view.getWest()) * PAN_ALLOWANCE;
+  const dy = (view.getNorth() - view.getSouth()) * PAN_ALLOWANCE;
+  map.setMaxBounds([
+    [view.getWest() - dx, view.getSouth() - dy],
+    [view.getEast() + dx, view.getNorth() + dy],
+  ]);
+}
+
+/* Rotating the phone changes what "the country view" is, so the limit has to change with it
+ * - including for a reader who has already zoomed in, whose camera must survive untouched.
+ * Miss this and a portrait limit applied to a landscape screen clamps the zoom. */
+addEventListener('resize', () => {
+  if (fitUntilTouched) fitUkraine();
+  else refreshPanLimits();
+});
 
 map.on('style.load', () => {
   mapReady = true;
