@@ -763,32 +763,26 @@ function plausible(threat) {
     && lat >= PLAUSIBLE.south && lat <= PLAUSIBLE.north;
 }
 
-/* A target over a region with no alert cannot exist, because the target is WHY the alert is
- * declared. So when the official feed says a region is quiet, a marker floating over it is
- * an artefact of the aggregator - a track that was removed while our socket was down, or one
- * whose position drifted - and drawing it contradicts the panel sitting right above it.
+/* THERE IS NO RULE HERE THAT HIDES A TARGET BECAUSE ITS REGION IS QUIET, and the reason is
+ * worth keeping so nobody adds one again.
  *
- * Measured on a live snapshot during an active night: of 34 targets that named a region, 34
- * were over a region under alert and none over a quiet one. One snapshot is an indication,
- * not a measurement, which is why `hiddenByAlert` is counted and logged rather than left
- * silent - if this ever hides something real, it will say so.
+ * The idea is compelling: a target over a region with no alert cannot exist, because the
+ * target is why the alert is declared. It shipped on 2026-09-01 and was reverted the same
+ * night, because the data says otherwise.
  *
- * Three deliberate exemptions, each of them "we do not know" rather than "it is quiet":
- * a track the feed gives no region for and whose coordinates fall in no oblast (over the
- * sea, or just across the border); and any track at all while status.json is missing,
- * because a dead daemon must never empty the map. */
-let hiddenByAlert = 0;
-
-function underAlert(threat) {
-  if (!status || !status.regions) return true;      // no official picture: hide nothing
-  const named = threat.region ? regionFor(threat.region) : null;
-  if (named) return Boolean(named.alert);
-  const here = (Number.isFinite(threat.lon) && Number.isFinite(threat.lat))
-    ? oblastAt([threat.lon, threat.lat]) : null;
-  if (!here) return true;                            // outside Ukraine, or unplaceable
-  const found = regionFor(here);
-  return found ? Boolean(found.alert) : true;
-}
+ * Measured while it was live, with 11 of 27 subjects alerted: it was hiding seven tracks -
+ * six drones over Kyiv city and Kyiv oblast, at Lisovyi Masyv, Pechersk, Zhuliany, Brovary
+ * and Velyka Dymerka, two of them lifecycle=confirmed. Their ages were 9 to 12 minutes,
+ * inside the 8.5-to-14-minute range of every track it was still drawing. Not ghosts. Real,
+ * fresh, confirmed drones over the reader's own oblast, erased from the map.
+ *
+ * The all-clear is given when the danger to the population is judged over, not when the last
+ * drone has left the sky - and FPV drones, being small and close to the line, get no alert
+ * declared for them at all. So a quiet region with a target over it is an ordinary state of
+ * the world, not a contradiction.
+ *
+ * Ghost tracks are handled where the evidence actually points: the ballistic TTL below, and
+ * the plausibility box above. */
 
 /** Forget tracks the feed has stopped mentioning. Called from the frame loop. */
 function expireTracks(now) {
@@ -1038,8 +1032,7 @@ function render() {
   for (const [id, threat] of threats) {
     counts[threat.type] = (counts[threat.type] || 0) + 1;
 
-    if (hidden.has(threat.type) || !underAlert(threat)) {
-      if (!hidden.has(threat.type)) hiddenByAlert += 1;
+    if (hidden.has(threat.type)) {
       const existing = markers.get(id);
       if (existing) { existing.marker.remove(); markers.delete(id); }
       continue;
@@ -1930,15 +1923,6 @@ document.addEventListener('visibilitychange', () => {
     forceReconnect('onVisible');
   }
 });
-
-/* Observability for the rule above: if it is ever hiding a real target, this is where that
- * shows up. Once a minute, not per frame. */
-setInterval(() => {
-  if (hiddenByAlert) {
-    console.info(`прибрано цілей над областями без тривоги: ${hiddenByAlert} за хвилину`);
-    hiddenByAlert = 0;
-  }
-}, 60000);
 
 setInterval(fetchStatus, 5000);
 setInterval(paintStatus, 15000);   // keeps the freshness line honest while idle
