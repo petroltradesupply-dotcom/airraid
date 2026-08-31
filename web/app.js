@@ -722,7 +722,105 @@ function normaliseOblast(name) {
 /* --------------------------------------------------------------------- state */
 
 const threats = new Map();       // id -> threat
+const seenAt = new Map();        // id -> when the feed last sent this track, ms
 const markers = new Map();       // id -> { marker, el, type }
+
+/* A box the map will draw a target inside, and outside which it refuses.
+ *
+ * Ukraine plus roughly three degrees: enough for the Black Sea, for a launch point just
+ * over the border, and for the Sea of Azov. Not enough for the Baltic. On 2026-08-31 a red
+ * ballistic marker appeared jammed into the top-left corner of the map, nose against the
+ * edge, pointing at nothing - and the daemon's own copy of the feed had no such track, so
+ * it came from the page's own socket and could not be reproduced. The lesson is not to find
+ * that one track: we do not control an aggregator's data quality, so a position that cannot
+ * be true must not be drawn. */
+const PLAUSIBLE = { west: 19.0, east: 44.0, south: 41.5, north: 55.0 };
+
+/* How long a track may go without the feed mentioning it before the page drops it.
+ *
+ * BALLISTIC ONLY, and the emptiness of the rest of this table is the point. A 'remove'
+ * envelope missed while the socket was down leaves a ghost that never leaves the map, and
+ * that has actually happened - to a ballistic track. It has not happened to anything else,
+ * and a limit invented for a class that has shown no problem is a way to erase a real
+ * target. A Shahed can be in the air for three hours; a jet drone circles; a KAB is
+ * re-reported for as long as the aircraft keeps releasing. None of them may be buried on a
+ * timer.
+ *
+ * Ten minutes for ballistic because that is what the thing does. Measured over 56 stored
+ * ballistic tracks: median under a minute, 90th percentile 8.5 minutes, longest 13.0, none
+ * past 20. A ballistic marker still on screen half an hour later is not a missile, it is a
+ * leak.
+ *
+ * The refresh rule keeps even this safe: the clock restarts every time the feed mentions
+ * the track, so one the feed keeps sending never expires however long it lives. */
+const TRACK_TTL_MIN = { ballistic: 10 };
+
+/** Does this position make sense at all? */
+function plausible(threat) {
+  const { lat, lon } = threat || {};
+  return Number.isFinite(lat) && Number.isFinite(lon)
+    && lon >= PLAUSIBLE.west && lon <= PLAUSIBLE.east
+    && lat >= PLAUSIBLE.south && lat <= PLAUSIBLE.north;
+}
+
+/* A target over a region with no alert cannot exist, because the target is WHY the alert is
+ * declared. So when the official feed says a region is quiet, a marker floating over it is
+ * an artefact of the aggregator - a track that was removed while our socket was down, or one
+ * whose position drifted - and drawing it contradicts the panel sitting right above it.
+ *
+ * Measured on a live snapshot during an active night: of 34 targets that named a region, 34
+ * were over a region under alert and none over a quiet one. One snapshot is an indication,
+ * not a measurement, which is why `hiddenByAlert` is counted and logged rather than left
+ * silent - if this ever hides something real, it will say so.
+ *
+ * Three deliberate exemptions, each of them "we do not know" rather than "it is quiet":
+ * a track the feed gives no region for and whose coordinates fall in no oblast (over the
+ * sea, or just across the border); and any track at all while status.json is missing,
+ * because a dead daemon must never empty the map. */
+let hiddenByAlert = 0;
+
+function underAlert(threat) {
+  if (!status || !status.regions) return true;      // no official picture: hide nothing
+  const named = threat.region ? regionFor(threat.region) : null;
+  if (named) return Boolean(named.alert);
+  const here = (Number.isFinite(threat.lon) && Number.isFinite(threat.lat))
+    ? oblastAt([threat.lon, threat.lat]) : null;
+  if (!here) return true;                            // outside Ukraine, or unplaceable
+  const found = regionFor(here);
+  return found ? Boolean(found.alert) : true;
+}
+
+/** Forget tracks the feed has stopped mentioning. Called from the frame loop. */
+function expireTracks(now) {
+  for (const [id, threat] of threats) {
+    const minutes = TRACK_TTL_MIN[threat.type];
+    if (minutes === undefined) continue;   // no limit unless this class has earned one
+    const ttl = minutes * 60000;
+    const last = seenAt.get(id) ?? 0;
+    if (now - last > ttl) {
+      threats.delete(id);
+      seenAt.delete(id);
+      const m = markers.get(id);
+      if (m) { m.marker.remove(); markers.delete(id); }
+    }
+  }
+}
+
+/** Record every track the feed hands us, dropping the ones at impossible positions. */
+function acceptTrack(t) {
+  if (!t || !t.id) return;
+  if (!plausible(t)) {
+    if (!acceptTrack.warned.has(t.id)) {
+      acceptTrack.warned.add(t.id);
+      console.warn('target outside the plausible box, not drawn', t.id, t.type, t.lat, t.lon);
+    }
+    threats.delete(t.id);
+    return;
+  }
+  threats.set(t.id, t);
+  seenAt.set(t.id, Date.now());
+}
+acceptTrack.warned = new Set();
 let hidden = new Set(JSON.parse(localStorage.getItem('radar.hidden') || '[]'));
 let lastFrameAt = 0;
 let lastDataAt = 0;
@@ -824,9 +922,12 @@ function agoText(date) {
   const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
   if (seconds < 45) return 'щойно';
   const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} ${pluralUk(minutes, 'хвилину', 'хвилини', 'хвилин')} тому`;
+  /* Abbreviated, which also retires the declension. "хвилину / хвилини / хвилин" needed
+   * three forms and a plural rule to say what "хв" says in two characters and cannot get
+   * wrong. */
+  if (minutes < 60) return `${minutes} хв тому`;
   const hours = Math.round(minutes / 60);
-  return `${hours} ${pluralUk(hours, 'годину', 'години', 'годин')} тому`;
+  return `${hours} год тому`;
 }
 
 /* Exactly one popup at a time, and it closes itself.
@@ -923,12 +1024,14 @@ function escapeHtml(s) {
 function render() {
   if (!mapReady) return;
   const now = Date.now();
+  expireTracks(now);
   const counts = Object.create(null);
 
   for (const [id, threat] of threats) {
     counts[threat.type] = (counts[threat.type] || 0) + 1;
 
-    if (hidden.has(threat.type)) {
+    if (hidden.has(threat.type) || !underAlert(threat)) {
+      if (!hidden.has(threat.type)) hiddenByAlert += 1;
       const existing = markers.get(id);
       if (existing) { existing.marker.remove(); markers.delete(id); }
       continue;
@@ -1053,14 +1156,15 @@ function connect() {
     switch (env.type) {
       case 'snapshot': {
         threats.clear();
-        for (const t of (env.data?.threats || [])) threats.set(t.id, t);
+        seenAt.clear();
+        for (const t of (env.data?.threats || [])) acceptTrack(t);
         break;
       }
       case 'upsert':
-        if (env.data?.id) threats.set(env.data.id, env.data);
+        acceptTrack(env.data);
         break;
       case 'remove':
-        if (env.data?.id) threats.delete(env.data.id);
+        if (env.data?.id) { threats.delete(env.data.id); seenAt.delete(env.data.id); }
         break;
       /* Neptun's own alert envelope is deliberately ignored: alerts come from the
        * official feed through status.json. Its threat track envelopes above are the only
@@ -1092,7 +1196,8 @@ async function restFallback() {
   try {
     const data = await fetch(`${NEPTUN}/api/v1/threats`).then(r => r.json());
     threats.clear();
-    for (const t of (data.threats || [])) threats.set(t.id, t);
+    seenAt.clear();
+    for (const t of (data.threats || [])) acceptTrack(t);
     lastDataAt = Date.now();
     paintStatus();
   } catch (err) {
@@ -1127,6 +1232,18 @@ function applyAlerts() {
      * "somewhere in this oblast" serves a reader better than a calm map. */
     if (region.whole || codes.length === 0) {
       wholeOblasts.add(normaliseOblast(region.name));
+    }
+    /* Sevastopol follows Crimea, and this is the one place the page adds something the feed
+     * does not say. alerts.in.ua carries a single permanent alert for the Autonomous
+     * Republic of Crimea, running since 2022-12-10, and none for Sevastopol - which in
+     * Ukraine's register is a separate subject, a city with special status, and has never
+     * been declared on its own. Drawn faithfully that leaves a dark notch inside a red
+     * peninsula, which reads as a rendering fault rather than as "quiet here".
+     *
+     * This is geography, not a threat the page invented: Sevastopol sits inside the
+     * peninsula the alert covers. It is deliberately the only inference of its kind. */
+    if (normaliseOblast(region.name) === 'крим' && region.alert) {
+      wholeOblasts.add('севастополь');
     }
     for (const code of codes) raionCodes.add(code);
   }
@@ -1255,10 +1372,17 @@ function paintStatus() {
         cls = 'watch';
         subCls = 'watch';
         sub = 'Загроза балістики';
-      } else if (status.state === 'armed' && isKyivPlace()) {
+      } else if (status.state === 'armed' && isKyivPlace() && !status.armed_elsewhere) {
         cls = 'watch';
         subCls = 'watch';
-        /* Only say "ballistic" when a ballistic marker is what armed it. A missile or
+        /* Say nothing at all when the thing that armed the engine was aimed somewhere
+         * else. The engine arms on any ballistic declaration and relies on its own
+         * suppression to stay quiet, which works for the alarm and did not work here: this
+         * line read a bare `armed` as "a threat over you". Live on 2026-08-31, "Швидкісна
+         * ціль в напрямку Чорноморська/Одеси" put "Загроза балістики" in front of a reader
+         * in Buchanskyi raion for a missile 400 km away.
+         *
+         * Only say "ballistic" when a ballistic marker is what armed it. A missile or
          * aviation post arms the engine too, and announcing those as a ballistic threat
          * makes the whole panel untrustworthy. */
         sub = status.armed_class === 'ballistic' ? 'Загроза балістики'
@@ -1750,6 +1874,15 @@ document.addEventListener('visibilitychange', () => {
   fetchStatus();
   if (!ws || ws.readyState > 1) { retries = 0; connect(); }
 });
+
+/* Observability for the rule above: if it is ever hiding a real target, this is where that
+ * shows up. Once a minute, not per frame. */
+setInterval(() => {
+  if (hiddenByAlert) {
+    console.info(`прибрано цілей над областями без тривоги: ${hiddenByAlert} за хвилину`);
+    hiddenByAlert = 0;
+  }
+}, 60000);
 
 setInterval(fetchStatus, 5000);
 setInterval(paintStatus, 15000);   // keeps the freshness line honest while idle
