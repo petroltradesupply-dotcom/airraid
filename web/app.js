@@ -1185,9 +1185,49 @@ function connect() {
     }
     paintStatus();
   };
-  ws.onclose = () => { ws = null; scheduleReconnect(); };
+  ws.onclose = () => { ws = null; socketStats.closes += 1; socketStats.reconnects += 1; scheduleReconnect(); };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
+
+/* A socket can be dead while the browser still calls it OPEN, and on iOS that is the normal
+ * case: the system kills the connection while the app is backgrounded and nothing notices
+ * until the TCP stack times out, which can take tens of seconds. During that time the page
+ * shows a stale picture and the reader waits for "онлайн" to come back.
+ *
+ * So liveness is judged by traffic, not by readyState. Measured on the live feed: Neptun
+ * sends a heartbeat every ~15 s and the longest gap between any two messages over 75 s was
+ * 16 s. Forty-five seconds is three missed heartbeats - long enough never to fire on a
+ * healthy connection, short enough that a dead one is noticed before the reader is. */
+const SOCKET_SILENCE_MS = 45000;
+
+/* Counted rather than silent, because "the socket keeps dropping" was a complaint nobody
+ * could put a number to. Printed once a minute when non-zero. */
+const socketStats = { reconnects: 0, watchdog: 0, onVisible: 0, closes: 0 };
+
+function forceReconnect(reason) {
+  socketStats.reconnects += 1;
+  socketStats[reason] = (socketStats[reason] || 0) + 1;
+  if (ws) { try { ws.onclose = null; ws.close(); } catch {} ws = null; }
+  clearTimeout(reconnectTimer);
+  retries = 0;
+  socketState = 'reconnecting';
+  paintStatus();
+  restFallback();          // keep the map fed while the socket comes back
+  connect();
+}
+
+setInterval(() => {
+  if (socketState === 'live' && lastDataAt && Date.now() - lastDataAt > SOCKET_SILENCE_MS) {
+    forceReconnect('watchdog');
+  }
+}, 5000);
+
+setInterval(() => {
+  if (socketStats.reconnects) {
+    console.info('перепідключення сокета за хвилину:', JSON.stringify(socketStats));
+    socketStats.reconnects = socketStats.watchdog = socketStats.onVisible = socketStats.closes = 0;
+  }
+}, 60000);
 
 function scheduleReconnect() {
   socketState = 'reconnecting';
@@ -1880,7 +1920,15 @@ document.getElementById('geo-detect').addEventListener('click', async (ev) => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   fetchStatus();
-  if (!ws || ws.readyState > 1) { retries = 0; connect(); }
+  /* Do NOT trust readyState here. Coming back from the lock screen the socket is usually
+   * still reported OPEN and is already dead; waiting for the browser to work that out is
+   * exactly the pause the reader sees before "онлайн" returns. If nothing has arrived in
+   * the last ten seconds - and something arrives every fifteen on a healthy feed - replace
+   * the connection rather than hope. Reconnecting a socket that turned out to be fine costs
+   * one round trip. */
+  if (!ws || ws.readyState > 1 || !lastDataAt || Date.now() - lastDataAt > 10000) {
+    forceReconnect('onVisible');
+  }
 });
 
 /* Observability for the rule above: if it is ever hiding a real target, this is where that
