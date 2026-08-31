@@ -299,7 +299,7 @@ addEventListener('resize', () => { if (fitUntilTouched) fitUkraine(); });
 map.on('style.load', () => {
   mapReady = true;
   fitUkraine();
-  addOblastLayer();
+  addOblastLayer().then(addRaionLayer);
   render();
 });
 
@@ -462,6 +462,82 @@ async function addOblastLayer() {
   }
 }
 
+/** Raion outlines and fills - the level an air-raid alert is actually declared at.
+ *
+ * An alert is declared per raion far more often than per oblast: on 2026-08-31 at 18:02
+ * twenty-six raions were alerted and only three oblasts. Painting the whole oblast because
+ * one of its raions is up overstates in the direction that matters - it tells someone their
+ * region is dangerous while their own district is quiet. Kyiv oblast had exactly one raion
+ * up that evening, Vyshhorodskyi, and the page showed all seven.
+ *
+ * Keyed by Neptun's own raion key, which is the same string in their alert feed and in
+ * their geometry - the one join in this page that needs no name matching at all.
+ *
+ * Drawn UNDER the oblast outline so an oblast border still reads as a border where a red
+ * patch touches it. */
+async function addRaionLayer() {
+  try {
+    const geo = await fetch('raions.geojson?v=ac1bd555').then(r => r.json());
+    /* Same as the oblasts: feature-state needs a stable id and the file carries none. */
+    geo.features.forEach((f, i) => { f.id = i; raionIndex.set(f.properties.key, i); });
+    map.addSource('raions', { type: 'geojson', data: geo });
+
+    /* If the oblast layer failed, its outline is not there to insert under; adding on top
+     * is still far better than not painting alerts at all. */
+    const under = map.getLayer('oblast-outline') ? 'oblast-outline' : undefined;
+
+    map.addLayer({
+      id: 'raion-alert-fill',
+      type: 'fill',
+      source: 'raions',
+      paint: {
+        'fill-color': '#ff2d55',
+        /* A shade stronger than the 0.10 an alerted oblast gets. A raion is a fraction of
+         * the area, and at country zoom the same opacity on a smaller patch reads as
+         * fainter than it is. */
+        'fill-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.13, 0],
+      },
+    }, under);
+
+    /* Quiet raion borders, and they appear only once the map is close enough that they
+     * explain the shape of a red patch. At country zoom 136 extra lines would be noise on a
+     * map whose whole job is to be read in one glance.
+     *
+     * A SEPARATE layer from the alerted outline below, not one layer with a conditional
+     * opacity, because MapLibre rejects a `zoom` expression nested inside a `case`: zoom may
+     * only be the input of a top-level interpolate or step. Written the other way it throws
+     * at addLayer and the layer silently never exists - which is exactly what happened. */
+    map.addLayer({
+      id: 'raion-line',
+      type: 'line',
+      source: 'raions',
+      minzoom: 6,
+      paint: {
+        'line-color': '#2f3550',
+        'line-width': 0.5,
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0, 7.5, 0.35],
+      },
+    }, under);
+
+    /* The alerted raion's own edge. Without it a patch at 0.13 opacity has no boundary and
+     * two adjacent alerted raions read as one shape. */
+    map.addLayer({
+      id: 'raion-alert-line',
+      type: 'line',
+      source: 'raions',
+      paint: {
+        'line-color': '#ff2d55',
+        'line-width': ['case', ['boolean', ['feature-state', 'alert'], false], 1.0, 0],
+        'line-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.7, 0],
+      },
+    }, under);
+
+    applyAlerts();
+  } catch (err) {
+    console.warn('raion layer failed', err);
+  }
+}
+
 /* Where to put an oblast's single label: the centre of its largest ring.
  *
  * The centre of the bounding box, not the centroid - for a shape like Odesa oblast the
@@ -489,6 +565,7 @@ function labelPoint(geom) {
 }
 
 const oblastIndex = new Map();
+const raionIndex = new Map();   // Neptun's raion key -> feature id
 const oblastShapes = new Map();  // normalised oblast name -> [geometry], filled on load
 
 /* Ray casting on the outer ring. Holes are ignored: an oblast's enclaves are far smaller
@@ -554,7 +631,6 @@ function normaliseOblast(name) {
 
 const threats = new Map();       // id -> threat
 const markers = new Map();       // id -> { marker, el, type }
-let alertedOblasts = new Set();
 let hidden = new Set(JSON.parse(localStorage.getItem('radar.hidden') || '[]'));
 let lastFrameAt = 0;
 let lastDataAt = 0;
@@ -818,7 +894,7 @@ function connect() {
   }
   socketState = 'connecting';
 
-  ws.onopen = () => { retries = 0; socketState = 'live'; fetchAlerts(); paintStatus(); };
+  ws.onopen = () => { retries = 0; socketState = 'live'; paintStatus(); };
   ws.onmessage = (ev) => {
     let env;
     try { env = JSON.parse(ev.data); } catch { return; }
@@ -836,8 +912,10 @@ function connect() {
       case 'remove':
         if (env.data?.id) threats.delete(env.data.id);
         break;
+      /* Neptun's own alert envelope is deliberately ignored: alerts come from the
+       * official feed through status.json. Its threat track envelopes above are the only
+       * thing this socket is here for. */
       case 'alerts':
-        setAlerts(env.data);
         break;
       case 'heartbeat':
       default:
@@ -872,31 +950,51 @@ async function restFallback() {
   }
 }
 
-async function fetchAlerts() {
-  try {
-    setAlerts(await fetch(`${NEPTUN}/api/v1/alerts`).then(r => r.json()));
-  } catch (err) {
-    console.warn('alerts fetch failed', err);
-  }
-}
-
-function setAlerts(data) {
-  const next = new Set();
-  for (const r of (data?.raions || [])) if (r.oblast) next.add(normaliseOblast(r.oblast));
-  for (const o of (data?.oblasts || [])) if (o.name) next.add(normaliseOblast(o.name));
-  alertedOblasts = next;
-  applyAlerts();
-}
-
+/* Which shapes the alert fill covers.
+ *
+ * Read from status.json and from nothing else, because that file carries alerts.in.ua -
+ * the official service. Neptun, which used to fill this map, says on its own page that it
+ * is not an official alert, and it disagrees with the official feed in both directions: on
+ * 2026-08-31 at 18:02 it claimed the whole Kharkivskyi raion while the official feed named
+ * only Lypetska hromada inside it.
+ *
+ * The daemon has already done the hard half. It resolves every alerted unit down to the
+ * raion it sits in and publishes KATOTTH codes, so there is no name matching here at all -
+ * which matters, because raion names are neither unique nor stable, and getting that wrong
+ * in a page means a district that silently never turns red. */
 function applyAlerts() {
-  if (!mapReady || !map.getSource('oblasts')) return;
-  for (const [name, id] of oblastIndex) {
-    const alert = alertedOblasts.has(name);
-    map.setFeatureState({ source: 'oblasts', id }, { alert });
-    /* The label lives on its own source, so its feature-state is a separate write - miss
-     * this and the outline turns red while its name stays grey. */
-    if (map.getSource('oblast-labels')) {
-      map.setFeatureState({ source: 'oblast-labels', id }, { alert });
+  if (!mapReady) return;
+
+  const wholeOblasts = new Set();
+  const raionCodes = new Set();
+
+  for (const region of Object.values(status?.regions || {})) {
+    if (!region.alert) continue;
+    const codes = region.raions || [];
+    /* Two ways an oblast gets filled entirely. `whole` is an oblast-wide declaration, which
+     * is the truth. No codes at all on an alerted oblast is the fallback: the feed named
+     * something with no geometry anywhere - a city, arriving without its hromada - and
+     * "somewhere in this oblast" serves a reader better than a calm map. */
+    if (region.whole || codes.length === 0) {
+      wholeOblasts.add(normaliseOblast(region.name));
+    }
+    for (const code of codes) raionCodes.add(code);
+  }
+
+  if (map.getSource('oblasts')) {
+    for (const [name, id] of oblastIndex) {
+      const alert = wholeOblasts.has(name);
+      map.setFeatureState({ source: 'oblasts', id }, { alert });
+      /* The label lives on its own source, so its feature-state is a separate write - miss
+       * this and the outline turns red while its name stays grey. */
+      if (map.getSource('oblast-labels')) {
+        map.setFeatureState({ source: 'oblast-labels', id }, { alert });
+      }
+    }
+  }
+  if (map.getSource('raions')) {
+    for (const [code, id] of raionIndex) {
+      map.setFeatureState({ source: 'raions', id }, { alert: raionCodes.has(code) });
     }
   }
 }
@@ -914,6 +1012,9 @@ async function fetchStatus() {
   } catch {
     status = null;
   }
+  /* The fill is part of the status now, not a separate feed, so it repaints here rather
+   * than on its own timer. */
+  applyAlerts();
   paintStatus();
 }
 
@@ -1498,12 +1599,10 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   fetchStatus();
   if (!ws || ws.readyState > 1) { retries = 0; connect(); }
-  else fetchAlerts();
 });
 
 setInterval(fetchStatus, 5000);
 setInterval(paintStatus, 15000);   // keeps the freshness line honest while idle
-setInterval(fetchAlerts, 60000);
 
 /* The catalogue is 39 KB and the headline needs it immediately - a reader whose place is
  * a raion would otherwise see the default for a moment. So it ships with the page rather

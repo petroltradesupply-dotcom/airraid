@@ -74,7 +74,8 @@ def check() -> list[str]:
                     " - браузери віддаватимуть стару версію з кешу"
                 )
 
-    for name in ("manifest.webmanifest", "map-style.json", "oblasts.geojson"):
+    for name in ("manifest.webmanifest", "map-style.json", "oblasts.geojson",
+                 "raions.geojson"):
         path = WEB / name
         if not path.exists():
             problems.append(f"немає {name}")

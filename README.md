@@ -43,6 +43,21 @@ never reach Kyiv, which is why they have their own row rather than sharing the d
 Without that last file the page still works in full — only the status panel says the
 verdict is unavailable, which is the honest answer rather than a green "no threat".
 
+### Where the alert comes from
+
+Only from alerts.in.ua, the official service, by way of the daemon's `status.json`. The page
+polls no aggregator for alerts, and that is deliberate: an aggregator says on its own page
+that it is not an official alert, and the two disagree in both directions. On 2026-08-31 at
+18:02 one claimed the whole of Kharkivskyi raion where the official feed named only Lypetska
+hromada inside it.
+
+Neptun is still the source of the *tracks* - the arrows and drone icons. What is flying and
+where an alert is running are two different questions with two different best answers.
+
+The daemon resolves every alerted unit down to a raion and publishes KATOTTH codes, so the
+page does no name matching at all. When an alert resolves to no raion - a city arriving
+without its hromada - the whole oblast lights instead: "somewhere in here" beats a calm map.
+
 **This does not replace the official air-raid alert.**
 
 ## Layout
@@ -54,8 +69,12 @@ web/                the page - no build step, no bundler, no framework
   style.css         dark theme, phone and desktop layouts
   map-style.json    MapLibre style, generated, recoloured to the dark navy palette
   maplibre-gl.*     vendored so the page does not depend on a CDN
-  oblasts.geojson   oblast boundaries: alert shading, oblast names, and deciding whether
-                    a track that arrived without a region is over your place
+  oblasts.geojson   oblast boundaries: names, whole-oblast alert shading, and deciding
+                    whether a track that arrived without a region is over your place
+  raions.geojson    the 136 raions of Ukraine, keyed by their KATOTTH code, generated from
+                    OpenStreetMap - an alert is declared per raion far more often than per
+                    oblast, and filling a whole oblast for one alerted raion tells someone
+                    their region is dangerous while their own district is quiet
   places.json       27 subjects + 136 raions with their oblast and a point to centre on,
                     generated - ships with the page, the headline needs it at once
   settlements.json  every city, town and village in Ukraine, 26,429 of them, generated -
