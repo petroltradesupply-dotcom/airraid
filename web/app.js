@@ -967,11 +967,19 @@ function showPopup(threat) {
     .setHTML(
       `<div class="popup__type">${TYPE_LABEL[threat.type] || threat.type}</div>` +
       `<div>${escapeHtml(threat.explanationShort || threat.title || '')}</div>` +
+      /* Speed is printed only when the feed measured one, which - over 14,632 stored frames
+       * - it never has, in any field. So in practice this line carries the course alone.
+       *
+       * It used to print "швидкість орієнтовна (180 км/год)" from the reference table, and
+       * that was a claim we had no business making: `uav` covers both a Shahed at 180 and a
+       * jet drone at 400-600, and Neptun types them identically, so the number was wrong
+       * for a whole class of target and stated with a straight face. The reference speeds
+       * stay - they move the marker between updates, which is a smoothing choice the reader
+       * never has to trust - but they are no longer shown as fact. */
       (headingOf(threat) === null ? '' :
         `<div class="popup__meta">курс: ${compass(headingOf(threat))}` +
         (threat.velocity && Number.isFinite(threat.velocity.speedKmh)
-          ? ` · ${Math.round(threat.velocity.speedKmh)} км/год`
-          : ` · швидкість орієнтовна (${REFERENCE_KMH[threat.type] ?? 150} км/год)`) +
+          ? ` · ${Math.round(threat.velocity.speedKmh)} км/год` : '') +
         `</div>`) +
       `<div class="popup__meta">${escapeHtml(parts.join(' · '))}` +
       (when ? ` · <span class="popup__ago">${agoText(when)}</span>` : '') +
