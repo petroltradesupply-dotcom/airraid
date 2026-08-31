@@ -1,0 +1,12 @@
+# Accepted exceptions for THIS repository. One regular expression per line, matched against
+# "path:line".
+#
+# This is the PUBLIC repo, so the list stays as short as it can be: every line here is a
+# place the scanner has been told to stop looking. Nothing goes in without a reason written
+# beside it.
+
+# KATOTTH codes are Ukraine's public register of administrative units - the identifier of a
+# raion, not of a person or an account. The scanner cannot tell them apart from a tax or
+# passport number by shape alone. Named file by file rather than opening all of web/, which
+# is the part that actually gets published.
+^web/raions\.geojson:
