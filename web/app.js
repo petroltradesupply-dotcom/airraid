@@ -328,7 +328,10 @@ async function addOblastLayer() {
       source: 'oblasts',
       paint: {
         'fill-color': ['case', ['boolean', ['feature-state', 'alert'], false], '#ff2d55', '#000000'],
-        'fill-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.10, 0],
+        /* The same 0.13 a raion gets. Red has to mean one thing: with the oblast at 0.10 an
+         * oblast-wide alert looked milder than a single alerted raion next to it, which is
+         * backwards. */
+        'fill-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.13, 0],
       },
     });
     map.addLayer({
@@ -336,9 +339,18 @@ async function addOblastLayer() {
       type: 'line',
       source: 'oblasts',
       paint: {
-        'line-color': ['case', ['boolean', ['feature-state', 'alert'], false], '#ff2d55', '#3a4160'],
-        'line-width': ['case', ['boolean', ['feature-state', 'alert'], false], 1.4, 0.7],
-        'line-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.75, 0.5],
+        /* Never red, at any alert state, and always heavier than a raion line. Those two
+         * rules are the whole hierarchy: weight says which level a boundary belongs to,
+         * colour says nothing at all. When an alerted oblast got a red outline it was
+         * indistinguishable from the alerted raions inside it, and the map lost the one
+         * structure a reader navigates by.
+         *
+         * Weight grows with zoom because its job changes. With the whole country in frame
+         * it only has to separate neighbours; close in it has to stay legible across a red
+         * fill and above the raion lines it outranks. */
+        'line-color': '#5a638a',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.8, 6, 1.6, 8, 2.0],
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 6, 0.75],
       },
     });
     /* Our own oblast names, replacing upstream's `place_state`.
@@ -511,26 +523,25 @@ async function addRaionLayer() {
       id: 'raion-line',
       type: 'line',
       source: 'raions',
-      minzoom: 6,
+      minzoom: 5,
       paint: {
-        'line-color': '#2f3550',
-        'line-width': 0.5,
-        'line-opacity': ['interpolate', ['linear'], ['zoom'], 6, 0, 7.5, 0.35],
+        /* Lighter than the alert fill on purpose. At #2f3550 these lines were darker than
+         * the red they cross and vanished inside it, so the districts a reader was trying
+         * to tell apart were exactly the ones with no visible boundary. */
+        'line-color': '#4d5678',
+        'line-width': 0.6,
+        'line-opacity': ['interpolate', ['linear'], ['zoom'], 5, 0, 6.5, 0.45, 9, 0.55],
       },
     }, under);
 
-    /* The alerted raion's own edge. Without it a patch at 0.13 opacity has no boundary and
-     * two adjacent alerted raions read as one shape. */
-    map.addLayer({
-      id: 'raion-alert-line',
-      type: 'line',
-      source: 'raions',
-      paint: {
-        'line-color': '#ff2d55',
-        'line-width': ['case', ['boolean', ['feature-state', 'alert'], false], 1.0, 0],
-        'line-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.7, 0],
-      },
-    }, under);
+    /* There is deliberately NO red outline on an alerted raion.
+     *
+     * It was tried and it was wrong. Outlining each alerted raion turns a mass of adjacent
+     * alerted districts - which is what a real attack looks like - into a red field ruled
+     * into stripes, and the stripes carry no information: nobody needs to know where
+     * Buchanskyi ends and Vyshhorodskyi begins when both are under alert. Red means area,
+     * never line. Boundaries are the grey layer above, identical inside the red and outside
+     * it, which is what makes them read as geography rather than as alarm. */
 
     applyAlerts();
   } catch (err) {
