@@ -121,6 +121,49 @@ background colour was the wrong paint - it sits so close to the ground colour th
 full opacity caps out at 1.5x. Black would reach 3.3x and take the neighbours' geography
 with it, which defeats the point of keeping them visible.
 
+## How an alert is painted
+
+**At raion level, from the official feed only.** An alert is declared per raion far more
+often than per oblast - on 2026-08-31 at 18:02 the official feed had twenty-five alerted
+raions against two alerted oblasts - and filling the whole oblast because one of its raions
+is up tells someone their region is dangerous while their own district is quiet. Kyiv oblast
+had exactly one raion up that evening, Vyshhorodskyi, and this page showed all seven.
+
+The alerts come from alerts.in.ua through the daemon's `status.json` and from nowhere else.
+An aggregator used to fill this map and says on its own page that it is not an official
+alert; the two disagree in both directions, and that same evening it claimed the whole of
+Kharkivskyi raion where the official feed named only Lypetska hromada inside it. Neptun
+remains the source of the *tracks* - what is flying is a different question from where an
+alert is running.
+
+**The join is a KATOTTH code, resolved daemon-side.** The page does no name matching at all,
+because raion names are neither unique nor stable: "Первомайський район" exists in
+Mykolaivska oblast and in Crimea, and Crimea's Курманський is the former Красногвардійський -
+one code, two titles, either of which may arrive. `web/raions.geojson` carries the 136 raions
+from OpenStreetMap, filtered to boundaries holding a code, which is also what keeps the
+occupation administration's divisions out.
+
+**When an alert resolves to no raion, the whole oblast lights.** A city arriving without its
+hromada has no raion anywhere in the data. "Somewhere in here" serves a reader better than a
+calm map, and the page can tell the two cases apart because `alert` is true while `raions` is
+empty.
+
+**Red is fill, never line.** Outlining each alerted raion in red turned a mass of adjacent
+alerted districts - which is what a real attack looks like - into a red field ruled into
+stripes, and the stripes carried no information: nobody needs to know where Buchanskyi ends
+and Vyshhorodskyi begins when both are under alert. Boundaries are grey and identical inside
+the red and outside it, which is what makes them read as geography rather than as alarm, and
+weight alone says which level a boundary belongs to - an oblast line is always heavier than a
+raion line.
+
+The red is `#ff3b30` at 0.22, one value for the whole application. It was picked by rendering
+six candidates on live data side by side. The former `#ff2d55` is a pink crimson and over
+this ground at 0.13 it blends to `#392136`, 1.6x the ground - decoration, not alarm; raising
+the density alone leaves it magenta. Two candidates measured brighter and were rejected for
+reasons arithmetic alone would have missed: pure `#ff1a1a` has too little blue and goes dull
+on a navy ground, and `#ff4d2e` drifts orange, which is already the legend's colour for
+Ракети and КАБ sitting directly beneath it.
+
 ## Things that turned out to matter
 
 **iOS standalone height.** With `apple-mobile-web-app-status-bar-style=black-translucent`
@@ -141,4 +184,34 @@ query string changes, so every asset carries `?v=<sha1[:8]>` and `tools/check_we
 fails if a hash and its file disagree.
 
 **MapLibre load events.** `map.on('load')` never fired with the upstream sprite; the page
-listens for `style.load` and handles `styleimagemissing` instead.
+listens for `style.load` and handles `styleimagemissing` instead. And `style.load` fires only
+once: measured, `map.setStyle()` emits `styledata`, `sourcedata` and `idle` but *not*
+`style.load`, so every layer this page adds is wiped and never restored. Recolouring the map
+means `setPaintProperty` over the existing style - 57 colour properties in 1 ms, with the
+camera and the alert feature-state untouched - not swapping the style out.
+
+**A `zoom` expression cannot be nested inside a `case`.** MapLibre allows zoom only as the
+input of a top-level `interpolate` or `step`; written any other way `addLayer` throws and the
+layer silently never exists. That cost a raion-border layer that read as correct and simply
+was not there. Split the layer, and assert `map.getLayer(id)` after adding one.
+
+**No roads below zoom 11.** They used to flare up at one band of zooms and vanish again,
+which reads as a glitch: the style turned `highway_major_subtle` on at z6 and off at z11, so
+primary and secondary roads appeared across the whole country in the middle of the range.
+This page is not for navigation - below z11 roads carry nothing and every threshold is a
+flicker. Counted rendered features to confirm: 0 at z7 and z10.8, 204 at z11.4, 2187 at z12.
+
+**Panning is limited to the country view plus a twelfth of a screen.** The base map is the
+whole world, so one careless swipe sent the country off screen and getting back meant zooming
+out, recognising Spain and panning east. The limit is a fraction of the *fitted view* rather
+than a fixed margin in kilometres, and that had to be measured: with Ukraine plus 300 km as
+hard limits MapLibre refuses to zoom out far enough to fit the country on a portrait phone and
+cuts the north and south off - every fixed margin up to roughly 600 km failed on at least one
+of five viewports, the tall portrait phone always the binding case. A limit derived from the
+fitted view cannot clamp it, because the fitted view is inside the limit by construction.
+
+At the minimum zoom the viewport *is* the limit rect, which is what defines the minimum zoom,
+so the whole country is on screen there and panning is impossible - 100 % of Ukraine visible
+after a full-width fling, on every viewport and for allowances of 0, 8 and 20 %. Sized from
+data too: across 12,770 stored Neptun track frames, not one falls outside Ukraine's bounding
+box.
