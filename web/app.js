@@ -290,8 +290,16 @@ for (const ev of ['dragstart', 'zoomstart', 'rotatestart']) {
 }
 
 /* How far past the country view a reader may pan, as a fraction of the fitted view on each
- * side. 0.2 means a fifth of a screen in any direction: enough to nudge Odesa or Kharkiv off
- * the edge for a closer look, not enough to lose the country.
+ * side. A twelfth of a screen: enough to nudge Odesa or Kharkiv off the edge for a closer
+ * look, and no more.
+ *
+ * It is deliberately small, and the reason is what this number does NOT control. At the
+ * minimum zoom the viewport is exactly the limit rect - that is what defines the minimum
+ * zoom - so the whole country is on screen and panning is impossible there, measured at
+ * 100 % of Ukraine visible for allowances of 0, 8 and 20 %. What the number does control is
+ * how much empty ground surrounds the country at that most-zoomed-out view: at 20 % the
+ * minimum zoom was 3.47 on a 430-point phone against a 3.95 fit, so the country sat small in
+ * a field of neighbours. At 8 % it is 3.74 and the country nearly fills the screen.
  *
  * A limit is needed at all because the base map is the whole world. One careless swipe on a
  * phone sent the country off-screen, and getting back meant zooming out, recognising Spain,
@@ -304,7 +312,7 @@ for (const ev of ['dragstart', 'zoomstart', 'rotatestart']) {
  * margin up to ~600 km did this on at least one of them, and the tall portrait phone is
  * always the binding case. Deriving the limit from the fitted view cannot clamp it, because
  * the fitted view is inside the limit by construction. */
-const PAN_ALLOWANCE = 0.2;
+const PAN_ALLOWANCE = 0.08;
 
 /* The pan limit, recomputed for the current viewport. Never moves the camera: the fit runs
  * with the limit cleared and the previous camera is put back in the same tick, so nothing
