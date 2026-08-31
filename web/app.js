@@ -20,6 +20,25 @@ const STATUS_URL = 'live/status.json';
 
 const KYIV = [30.5234, 50.4501];
 
+/* The country, corner to corner, measured off web/oblasts.geojson rather than guessed:
+ * 22.14..40.23 east, 44.39..52.37 north. The map opens fitted to this on every screen, so
+ * the first thing anyone sees is all of Ukraine - phone, tablet or desktop - instead of a
+ * fixed zoom that frames it on one of them and crops it on the others. */
+const UKRAINE_BOUNDS = [[22.14, 44.39], [40.23, 52.37]];
+
+/* Room for the things that float over the map, so the country is not fitted underneath
+ * them. Horizontally symmetric, and that is the whole point of this comment: reserving
+ * space on the right for the two round buttons pushed the country left by exactly that
+ * much - about 130 device pixels against 40 on the left - and it looked off-centre because
+ * it was. The buttons sit in the bottom corner, so the bottom inset already covers them;
+ * paying for them across the full height bought nothing and cost the centring. */
+function fitPadding() {
+  const wide = window.innerWidth >= 900 && window.innerHeight >= 500;
+  return wide
+    ? { top: 24, right: 24, bottom: 32, left: 24 }
+    : { top: 16, right: 16, bottom: 104, left: 16 };
+}
+
 /* Declared up here, far from the code that uses them, on purpose: `paintStatus` reads
  * `place`, and a `let` is not hoisted. Today nothing paints before the bottom of this file
  * runs, but a single early call added later would throw at three in the morning, which is
@@ -233,9 +252,15 @@ const map = new maplibregl.Map({
    * would sit invisible behind the cache. tools/check_web.py verifies these hashes too,
    * which is the only reason they can be trusted to be right. */
   style: 'map-style.json?v=457dfc20',
-  center: [place.lon, place.lat],
-  zoom: place.zoom || 7.2,
-  minZoom: 4,
+  /* Fitted to the country, not centred on the reader's place. The place drives the status
+   * line and the "to me" button; the opening view is meant to answer "what is happening"
+   * before "what is happening to me". */
+  bounds: UKRAINE_BOUNDS,
+  fitBoundsOptions: { padding: fitPadding(), animate: false },
+  /* 3, not 4. Fitting the country on a phone needs zoom 3.61: these are 512-pixel vector
+   * tiles, so a 390-pixel viewport shows only 17 degrees at zoom 4 and Ukraine is 18.1 wide.
+   * At minZoom 4 the fit was silently clamped and the west stayed off-screen. */
+  minZoom: 3,
   maxZoom: 12,
   attributionControl: false,
   /* Pitch and rotation add nothing to reading positions and make a phone map easy to
@@ -252,8 +277,28 @@ let mapReady = false;
  * that fails to resolve can leave 'load' un-fired forever - the map draws, tiles arrive,
  * and nothing that waits on 'load' ever runs. 'style.load' fires as soon as the style is
  * usable, which is exactly when layers may be added. */
+/* Refitted here, not only in the constructor. `fitBounds` measures the container, and at
+ * construction time the grid has not laid it out yet - on a phone that produced a view
+ * about two degrees too tight, with Zakarpattia and Volyn off the left edge. Measuring
+ * again once the style is up gets the real size.
+ *
+ * `fitUntilTouched` stops it fighting the reader: once they pan, zoom or pick a place, the
+ * view is theirs and a later resize must not yank it back to the whole country. */
+let fitUntilTouched = true;
+for (const ev of ['dragstart', 'zoomstart', 'rotatestart']) {
+  map.on(ev, () => { fitUntilTouched = false; });
+}
+
+function fitUkraine() {
+  map.resize();
+  map.fitBounds(UKRAINE_BOUNDS, { padding: fitPadding(), animate: false });
+}
+
+addEventListener('resize', () => { if (fitUntilTouched) fitUkraine(); });
+
 map.on('style.load', () => {
   mapReady = true;
+  fitUkraine();
   addOblastLayer();
   render();
 });
@@ -1333,6 +1378,7 @@ function renderPlaceList() {
       (hasChildren(p) ? '<span class="sheet__more">›</span>' : '');
     btn.addEventListener('click', () => {
       savePlace(p);
+      fitUntilTouched = false;
       flyToPlace();
       if (!hasChildren(p)) { closeSheet(); return; }
       /* Descend, so the next tap refines. Selection already happened. */

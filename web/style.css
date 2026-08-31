@@ -154,7 +154,9 @@ body {
 /* Wide screens: the bar becomes a column beside the map, so the map keeps its height. */
 @media (min-width: 900px) and (min-height: 500px) {
   body {
-    grid-template-columns: 340px 1fr;
+    /* 230, not 340. The column holds a headline, four short rows and seven legend items;
+       a third of its old width was empty. */
+    grid-template-columns: 230px 1fr;
     grid-template-rows: 1fr;
     grid-template-areas: "status map";
   }
@@ -168,14 +170,16 @@ body {
     padding: calc(var(--top) + 24px) 20px 20px;
   }
   .status__meta { text-align: left; font-size: 13px; }
-  .status__headline { font-size: 26px; }
+  /* 20, not 26: at 230px wide, "Дніпропетровській" alone is wider than the column at the
+     larger size, and a headline that wraps to three lines stops being a headline. */
+  .status__headline { font-size: 20px; }
   .status__reason { -webkit-line-clamp: 4; font-size: 14px; }
   .status__main { flex: 0 0 auto; }
   /* A very long reason plus seven legend rows can outgrow a 500px-tall window; scrolling
      the column is better than letting it spill over the map. */
   .status { overflow-y: auto; }
 
-  .attrib { padding-left: calc(340px + 10px); }
+  .attrib { padding-left: calc(230px + 10px); }
 }
 
 /* Landscape phone: almost no vertical room, so the bar collapses to one line. */
