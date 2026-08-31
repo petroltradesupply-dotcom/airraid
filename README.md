@@ -14,7 +14,7 @@ The status panel answers two independent questions, one line each, and never mix
 
 | Line | Question | Values |
 |---|---|---|
-| First | Is there an air-raid alert, and where | `Тривог немає` (green) · `Тривога в Києві` / `в Київській області` / `в Києві та області` (red) |
+| First | Is there an air-raid alert, where you have chosen | `Тривог немає` (green) · `Тривога в Києві` / `в Бучанському районі` / `в Одеській області` (red) |
 | Second | Is any of it ballistic, and what is up there | `Балістика на Київ` (red, pulsing) · `Загроза балістики` (yellow) · otherwise the composition over Kyiv in white, e.g. `Ракети 1 · БпЛА 5` |
 
 The second line lists **only what is over Kyiv and Kyiv oblast**, ordered by severity
@@ -55,7 +55,11 @@ web/                the page - no build step, no bundler, no framework
   map-style.json    MapLibre style, generated, recoloured to the dark navy palette
   maplibre-gl.*     vendored so the page does not depend on a CDN
   oblasts.geojson   oblast boundaries: alert shading, oblast names, and deciding whether
-                    a track that arrived without a region is over Kyiv
+                    a track that arrived without a region is over your place
+  places.json       27 subjects + 136 raions with their oblast and a point to centre on,
+                    generated - ships with the page, the headline needs it at once
+  settlements.json  every city, town and village in Ukraine, 26,429 of them, generated -
+                    loaded only when someone starts typing in the search
   ukraine-mask.geojson  the world with Ukraine as a hole, generated - dims everything
                     outside the country
 docker-compose.yml  the container that serves it
@@ -95,6 +99,7 @@ alongside a syntax check of `app.js`.
 python3 tools/make_map_style.py     # fetch the upstream style and recolour it
 python3 tools/make_icons.py         # render the PWA icon set
 python3 tools/make_mask.py          # union the oblasts into the outside-Ukraine mask
+python3 tools/make_places.py        # the place catalogues, and every raion's oblast
 ```
 
 `make_mask.py` needs `shapely`; nothing at runtime does.

@@ -26,7 +26,7 @@
 <link rel="manifest" href="manifest.webmanifest?v=557b2cbd">
 
 <link rel="stylesheet" href="maplibre-gl.css">
-<link rel="stylesheet" href="style.css?v=aa97f820">
+<link rel="stylesheet" href="style.css?v=fa8e504b">
 </head>
 <body>
 
@@ -38,8 +38,8 @@
     <div class="status__reason" id="reason">з'єднання з сервісом</div>
   </div>
   <div class="status__meta">
-    <div class="status__row"><span class="status__label">Київ</span><span id="kyiv">—</span></div>
-    <div class="status__row"><span class="status__label">Область</span><span id="oblast">—</span></div>
+    <div class="status__row"><span class="status__label" id="kyiv-label">Київ</span><span id="kyiv">—</span></div>
+    <div class="status__row" id="oblast-row"><span class="status__label">Область</span><span id="oblast">—</span></div>
     <div class="status__row"><span class="status__label">Цілі</span><span id="counts">—</span></div>
     <div class="status__row status__row--muted"><span class="status__label">Дані</span><span id="freshness">—</span></div>
   </div>
@@ -53,13 +53,67 @@
 
 <main id="map"></main>
 
-<button id="recenter" class="recenter" title="До Києва" aria-label="До Києва">
-  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-    <circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/>
-    <circle cx="12" cy="12" r="2" fill="currentColor"/>
-    <path d="M12 1v3M12 20v3M1 12h3M20 12h3" stroke="currentColor" stroke-width="2"/>
-  </svg>
-</button>
+<!-- The only corner of the map with nothing in it - legend on the left, panel on top -
+     and on a phone it falls under the thumb. -->
+<!-- Both glyphs are from Lucide (ISC licence), inlined rather than loaded: this page has
+     no icon font and no library, and two paths do not justify starting.
+
+     Not SF Symbols, which would have matched the phone: Apple licenses that set for use in
+     apps on Apple platforms only and forbids it on the web. -->
+<div class="mapbtns">
+  <button id="settings" class="mapbtn" title="Налаштування" aria-label="Налаштування">
+    <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none"
+         stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/>
+      <circle cx="12" cy="12" r="3"/>
+    </svg>
+  </button>
+  <!-- `locate-fixed`, not a bare crosshair: the filled centre is what says "you are
+       here" rather than "aim at something". -->
+  <button id="recenter" class="mapbtn" title="До мене" aria-label="До мене">
+    <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true" fill="none"
+         stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12h3M19 12h3M12 2v3M12 19v3"/>
+      <circle cx="12" cy="12" r="7"/>
+      <circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/>
+    </svg>
+  </button>
+</div>
+
+<!-- Settings. Manual choice is the primary way in; auto-detect only fills the same field,
+     so it is one item in this list rather than a mode of its own. -->
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet__panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet__head">
+      <div>
+        <div class="sheet__title" id="sheet-title">Ваше місце</div>
+        <div class="sheet__now" id="sheet-now">—</div>
+      </div>
+      <button id="sheet-close" class="sheet__x" aria-label="Закрити">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none"
+             stroke="currentColor" stroke-width="2">
+          <path d="M5 5l14 14M19 5L5 19"/>
+        </svg>
+      </button>
+    </div>
+
+    <nav id="sheet-crumbs" class="sheet__crumbs" aria-label="Рівень"></nav>
+
+    <button id="geo-detect" class="sheet__geo" type="button">Визначити автоматично</button>
+    <div class="sheet__msg" id="geo-msg" hidden></div>
+
+    <input id="place-search" class="sheet__search" type="search" autocomplete="off"
+           placeholder="Пошук: місто, село, район" aria-label="Пошук місця">
+    <ul id="place-list" class="sheet__list"></ul>
+
+    <p class="sheet__note">
+      Координати не покидають цей пристрій — область і район визначаються тут, на місці.
+      Вибір впливає лише на цю сторінку; повідомлення в Telegram надсилаються окремо.
+    </p>
+  </div>
+</div>
 
 <footer class="attrib">
   <a href="https://neptun.in.ua/" target="_blank" rel="noopener">NEPTUN</a> ·
@@ -67,6 +121,6 @@
 </footer>
 
 <script src="maplibre-gl.js"></script>
-<script src="app.js?v=15219b3d"></script>
+<script src="app.js?v=7e24e582"></script>
 </body>
 </html>

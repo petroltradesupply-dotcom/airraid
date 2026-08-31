@@ -20,6 +20,21 @@ const STATUS_URL = 'live/status.json';
 
 const KYIV = [30.5234, 50.4501];
 
+/* Declared up here, far from the code that uses them, on purpose: `paintStatus` reads
+ * `place`, and a `let` is not hoisted. Today nothing paints before the bottom of this file
+ * runs, but a single early call added later would throw at three in the morning, which is
+ * precisely when nobody is reading the console. */
+const PLACE_KEY = 'radar.place';
+const DEFAULT_PLACE = { level: 'oblast', key: 'м. київ', name: 'Київ',
+                        full: 'м. Київ', oblast: 'м. Київ',
+                        lon: KYIV[0], lat: KYIV[1], zoom: 7.2 };
+let places = [];              // the catalogue, from places.json
+let place = DEFAULT_PLACE;    // what the reader has chosen
+
+/* Restored before the map is constructed, because the map opens on it. Read after, and the
+ * page would centre on Kyiv and then jump. */
+loadPlace();
+
 /* How far ahead a track of each type may be projected between server updates, in minutes.
  * A ballistic track covers ground fast and its reports are sparse, so extrapolating it far
  * would draw a confident line through a position nobody reported - hence the short
@@ -218,8 +233,8 @@ const map = new maplibregl.Map({
    * would sit invisible behind the cache. tools/check_web.py verifies these hashes too,
    * which is the only reason they can be trusted to be right. */
   style: 'map-style.json?v=457dfc20',
-  center: KYIV,
-  zoom: 5.6,
+  center: [place.lon, place.lat],
+  zoom: place.zoom || 7.2,
   minZoom: 4,
   maxZoom: 12,
   attributionControl: false,
@@ -376,11 +391,13 @@ async function addOblastLayer() {
       } else if (region) {
         f.properties.label = region;
       }
-      /* The file carries Kyiv city and Kyiv oblast as separate shapes, which is exactly
-       * the pair the status line needs: roughly a fifth of Neptun's tracks arrive with no
-       * `region` at all, and for those the geometry is the only way to tell whether the
-       * thing is over us. */
-      if (name === 'київ' || name === 'київська') kyivShapes.push(f.geometry);
+      /* Every oblast's geometry, keyed by its normalised name. Roughly a fifth of
+       * Neptun's tracks arrive with no `region` at all, and for those the geometry is the
+       * only way to tell whether the thing is over the reader's place. Kyiv city is its
+       * own shape here, which is right - it is its own subject. */
+      const shapes = oblastShapes.get(name) || [];
+      shapes.push(f.geometry);
+      oblastShapes.set(name, shapes);
     });
     map.getSource('oblasts').setData(geo);
     map.getSource('oblast-labels').setData({
@@ -427,7 +444,7 @@ function labelPoint(geom) {
 }
 
 const oblastIndex = new Map();
-const kyivShapes = [];           // Kyiv city + Kyiv oblast geometry, filled on load
+const oblastShapes = new Map();  // normalised oblast name -> [geometry], filled on load
 
 /* Ray casting on the outer ring. Holes are ignored: an oblast's enclaves are far smaller
  * than the error already present in a track's reported position, so testing them would be
@@ -447,41 +464,42 @@ function inGeometry(geom, lon, lat) {
   return polys.some(poly => inRing(poly[0], lon, lat));
 }
 
-/* Is this track over Kyiv or the oblast? The reported region is authoritative when it is
- * there; geometry is the fallback. Memoised per track, because the polygons run to
- * thousands of points and this must not happen inside the animation frame. */
-const kyivCache = new Map();
-function overKyiv(threat) {
-  const stamp = `${threat.updatedAt || ''}|${threat.lat}|${threat.lon}`;
-  const hit = kyivCache.get(threat.id);
+/* Which oblast contains this point, if any. Used by auto-detect: these polygons are
+ * already loaded for the alert shading, so it costs no request and no extra data. */
+function oblastAt(lonLat) {
+  for (const [name, geoms] of oblastShapes) {
+    if (geoms.some(g => inGeometry(g, lonLat[0], lonLat[1]))) return name;
+  }
+  return null;
+}
+
+/* Geometry fallback for a track that arrived with no reported region. Memoised per track:
+ * the polygons run to thousands of points and this must never happen inside an animation
+ * frame. */
+const geoCache = new Map();
+function overGeometry(threat, oblastName) {
+  if (!Number.isFinite(threat.lat) || !Number.isFinite(threat.lon)) return false;
+  const want = normaliseOblast(oblastName || '');
+  const stamp = `${threat.updatedAt || ''}|${threat.lat}|${threat.lon}|${want}`;
+  const hit = geoCache.get(threat.id);
   if (hit && hit.stamp === stamp) return hit.value;
 
-  let value = false;
-  const region = normaliseOblast(threat.region || '');
-  if (region) {
-    value = region === 'київ' || region === 'київська';
-  } else if (Number.isFinite(threat.lat) && Number.isFinite(threat.lon)) {
-    value = kyivShapes.some(g => inGeometry(g, threat.lon, threat.lat));
-  }
+  const value = (oblastShapes.get(want) || [])
+    .some(g => inGeometry(g, threat.lon, threat.lat));
+
   /* Tracks come and go all night; without this the cache is a slow leak. */
-  if (kyivCache.size > 500) kyivCache.clear();
-  kyivCache.set(threat.id, { stamp, value });
+  if (geoCache.size > 500) geoCache.clear();
+  geoCache.set(threat.id, { stamp, value });
   return value;
 }
 
-/* What is over us right now, in the order the legend uses - severity first, so a lone
- * missile is read before twenty drones. */
-function kyivComposition() {
-  const counts = Object.create(null);
-  for (const t of threats.values()) if (overKyiv(t)) counts[t.type] = (counts[t.type] || 0) + 1;
-  const parts = [];
-  for (const t of TYPES) if (counts[t.key]) parts.push(`${t.label} ${counts[t.key]}`);
-  if (counts.unknown) parts.push(`Невідомі ${counts.unknown}`);
-  return parts.join(' · ');
-}
+/* Oblast names arrive spelled three ways - "м. Київ", "Київська область", "Автономна
+ * Республіка Крим" - from three sources with three conventions. Every comparison goes
+ * through here, because comparing them by hand is how a region silently stops matching. */
 function normaliseOblast(name) {
-  return name.toLowerCase()
+  return (name || '').toLowerCase()
     .replace(/^м\.\s*/, '')
+    .replace(/^автономна республіка\s*/, '')
     .replace(/\s+область$/, '')
     .replace(/\s+/g, ' ')
     .trim();
@@ -854,11 +872,21 @@ async function fetchStatus() {
   paintStatus();
 }
 
+/* Up here with the other lookups, not next to the sheet code that uses them: these are
+ * `const`, `renderPlaceList` is hoisted, and a call before the declaration would throw.
+ * Same reason `place` lives at the top of the file. */
+const sheet = document.getElementById('sheet');
+const placeList = document.getElementById('place-list');
+const placeSearch = document.getElementById('place-search');
+const geoMsg = document.getElementById('geo-msg');
+
 const el = {
   bar: document.getElementById('status'),
   headline: document.getElementById('headline'),
   reason: document.getElementById('reason'),
   kyiv: document.getElementById('kyiv'),
+  kyivLabel: document.getElementById('kyiv-label'),
+  oblastRow: document.getElementById('oblast-row'),
   oblast: document.getElementById('oblast'),
   freshness: document.getElementById('freshness'),
 };
@@ -876,13 +904,6 @@ const el = {
  *
  * The reason text ("ракета на Одесу") is gone on purpose: a launch at another city is
  * not information this page exists to carry. */
-function alertHeadline(kyiv, oblast) {
-  if (kyiv && oblast) return 'Тривога в Києві та області';
-  if (kyiv) return 'Тривога в Києві';
-  if (oblast) return 'Тривога в Київській області';
-  return 'Тривог немає';
-}
-
 function paintStatus() {
   let cls = 'unknown';          /* left edge: the most severe thing on the panel */
   let headline = 'Статус недоступний';
@@ -899,8 +920,8 @@ function paintStatus() {
       headline = 'Статус застарів';
       sub = `дані не оновлювались ${Math.round(ageS / 60)} хв`;
     } else {
-      alerted = Boolean(status.kyiv_alert || status.kyiv_oblast_alert);
-      headline = alertHeadline(status.kyiv_alert, status.kyiv_oblast_alert);
+      alerted = placeAlerted();
+      headline = placeHeadline();
 
       if (status.state === 'alarm') {
         cls = 'alarm';
@@ -922,15 +943,22 @@ function paintStatus() {
         /* Nothing ballistic to report, so the line is free for the question a person asks
          * next: what is actually up there. Only during an alert - listing tracks while the
          * city is quiet would be trivia. */
-        if (alerted) { sub = kyivComposition(); subCls = sub ? 'info' : ''; }
+        if (alerted) { sub = placeComposition(); subCls = sub ? 'info' : ''; }
       }
     }
-    el.kyiv.textContent = status.kyiv_alert ? 'тривога' : 'тихо';
-    el.oblast.textContent = status.kyiv_oblast_alert ? 'тривога' : 'тихо';
+    /* The two meta rows used to be "Київ" and "Область" unconditionally. They now follow
+     * the chosen place: the place itself, and the oblast it sits in - which for an oblast
+     * selection is the same thing, so the second row is dropped in that case. */
+    const region = regionFor(place.oblast);
+    el.kyivLabel.textContent = place.name;
+    el.kyiv.textContent = placeAlerted() ? 'тривога' : 'тихо';
+    el.oblastRow.hidden = place.level === 'oblast';
+    el.oblast.textContent = region && region.alert ? 'тривога' : 'тихо';
   } else {
     sub = 'сервіс сповіщень не відповідає';
     el.kyiv.textContent = '—';
     el.oblast.textContent = '—';
+    el.oblastRow.hidden = false;
   }
 
   el.bar.className = `status status--${cls}`;
@@ -953,8 +981,432 @@ function paintStatus() {
 
 /* ------------------------------------------------------------------ lifecycle */
 
-document.getElementById('recenter').addEventListener('click', () => {
-  map.flyTo({ center: KYIV, zoom: 7.2, duration: 800 });
+/* ------------------------------------------------------------------ your place */
+
+/* Which place this page is about. Everything above - the headline, the composition line,
+ * where the map opens - answers for THIS, not for Kyiv.
+ *
+ * Manual choice is the primary mechanism and auto-detect only fills the same field. So the
+ * stored value is always a concrete place, never a mode: open the page in another city
+ * tomorrow and your home region is still your home region, rather than silently becoming
+ * wherever the phone happens to be. */
+
+function loadPlace() {
+  try {
+    const raw = localStorage.getItem(PLACE_KEY);
+    if (raw) place = JSON.parse(raw);
+  } catch { /* corrupt or blocked storage: the default is a perfectly good answer */ }
+}
+
+function savePlace(next) {
+  place = next;
+  try { localStorage.setItem(PLACE_KEY, JSON.stringify(next)); } catch { /* private mode */ }
+  paintStatus();
+  render();
+  renderPlaceList();
+}
+
+/* The published status keys regions by their canonical English name and carries the
+ * Ukrainian one in `name`; the catalogue only knows Ukrainian. This bridges the two
+ * without a second copy of the mapping. */
+function regionFor(oblastName) {
+  const want = normaliseOblast(oblastName);
+  for (const entry of Object.values(status?.regions || {})) {
+    if (normaliseOblast(entry.name) === want) return entry;
+  }
+  return null;
+}
+
+/* Is the chosen place under an air-raid alert?
+ *
+ * An oblast is alerted when its own record says so. A raion is alerted when the oblast is
+ * up as a whole, or when that raion is named among the units - which is why the daemon
+ * publishes the unit list at all. */
+/* The unit whose alert this place inherits.
+ *
+ * A settlement does not get its own alert: alerts are declared for oblasts, raions and
+ * hromadas, never for a village. Choosing Крюківщина therefore means watching Бучанський
+ * район - which is also why the headline names the raion. */
+function unitOf(p) {
+  return p.level === 'oblast' ? null : (p.raion || p.name);
+}
+
+function alertedAt(p) {
+  const region = regionFor(p.oblast);
+  if (!region || !region.alert) return false;
+  if (p.level === 'oblast') return true;
+  if (region.whole) return true;
+  const want = normaliseOblast(unitOf(p));
+  return region.units.some(u => normaliseOblast(u) === want);
+}
+
+function placeAlerted() {
+  return alertedAt(place);
+}
+
+/* Is this track over the chosen place?
+ *
+ * Strings first: Neptun labels most tracks with a region and a district, and a string
+ * comparison is both exact and free. Geometry is the fallback for the roughly one track in
+ * five that arrives with no region at all - and only at oblast level, because raion
+ * polygons are deliberately not shipped to the browser.
+ *
+ * A settlement is treated as its raion here too. Matching on `locality` would be tighter
+ * but almost always empty, and an empty line reads as "nothing is flying" - which is the
+ * one thing this page must never imply without knowing it. */
+function overPlace(threat) {
+  if (place.level !== 'oblast') {
+    const unit = unitOf(place);
+    const key = (threat.regionKey || '').toLowerCase();
+    if (key && key === (place.raionKey || place.key)) return true;
+    return normaliseOblast(threat.district) === normaliseOblast(unit);
+  }
+  if (normaliseOblast(threat.region) === normaliseOblast(place.oblast)) return true;
+  return overGeometry(threat, place.oblast);
+}
+
+function placeComposition() {
+  const counts = Object.create(null);
+  for (const t of threats.values()) if (overPlace(t)) counts[t.type] = (counts[t.type] || 0) + 1;
+  const parts = [];
+  for (const t of TYPES) if (counts[t.key]) parts.push(`${t.label} ${counts[t.key]}`);
+  if (counts.unknown) parts.push(`Невідомі ${counts.unknown}`);
+  return parts.join(' · ');
+}
+
+/* The locative form comes from the catalogue, computed at build time for all 163 regular
+ * names. Ukrainian declension is not something to improvise here, and this is the line the
+ * reader looks at first. */
+function placeHeadline() {
+  if (!placeAlerted()) return 'Тривог немає';
+  return place.loc ? `Тривога в ${place.loc}` : `Тривога: ${place.name}`;
+}
+
+/* ------------------------------------------------------------- settings sheet */
+
+/* Ukraine -> oblast -> raion -> settlement, one level at a time. A flat list cannot work:
+ * "Іванівка" is the name of 107 different villages and "Вишневе" of 56, so a name on its
+ * own does not identify a place.
+ *
+ * Every tap both refines the selection and descends a level, so you can stop wherever you
+ * like - tap "Київська" and that is your place, tap again into "Бучанський" and now that
+ * is. Search cuts across all of it, because plenty of people do not know which raion their
+ * village ended up in after the 2020 reform. */
+
+let browse = { oblast: null, raion: null };
+let settlements = null;        // lazily loaded: 303 KB gzipped
+let settlementsLoading = null;
+
+function loadSettlements() {
+  if (settlements) return Promise.resolve(settlements);
+  if (settlementsLoading) return settlementsLoading;
+  settlementsLoading = fetch('settlements.json?v=cec1208e')
+    .then(r => r.json())
+    .then((data) => { settlements = data; return data; })
+    .catch((err) => { console.warn('settlements load failed', err); settlementsLoading = null; });
+  return settlementsLoading;
+}
+
+function raionByKey(key) {
+  return places.find(p => p.level === 'raion' && p.key === key);
+}
+
+/* Kyiv city and Sevastopol are subjects with no raions beneath them. Offering to descend
+ * into an empty list is a dead end, so they get no chevron and selecting them closes the
+ * sheet like a leaf. */
+function hasChildren(p) {
+  if (p.level === 'settlement') return false;
+  if (p.level === 'raion') return true;
+  return places.some(q => q.level === 'raion'
+    && normaliseOblast(q.oblast) === normaliseOblast(p.oblast));
+}
+
+function settlementPlace(row) {
+  const [name, idx, lon, lat] = row;
+  const raion = raionByKey(settlements.raions[idx]);
+  if (!raion) return null;
+  return {
+    level: 'settlement',
+    key: `${name}|${idx}`,
+    name,
+    full: `${name}, ${raion.name}`,
+    oblast: raion.oblast,
+    /* Carried so the alert, the composition and the headline all resolve to the raion
+     * without having to look it up again on every repaint. */
+    raion: raion.name,
+    raionKey: raion.key,
+    loc: raion.loc,
+    lon, lat,
+    zoom: 11,
+  };
+}
+
+function openSheet() {
+  sheet.hidden = false;
+  /* Open on the reader's SIBLINGS, not inside their own place. Someone opening this wants
+   * to change the choice, and a list of one thing's children is no help - Kyiv city has no
+   * raions at all, so opening inside it showed an empty list and a dead end. */
+  browse = place.level === 'oblast' ? { oblast: null, raion: null }
+    : place.level === 'raion' ? { oblast: place.oblast, raion: null }
+    : { oblast: place.oblast, raion: place.raionKey };
+  placeSearch.value = '';
+  renderPlaceList();
+  placeSearch.focus({ preventScroll: true });
+}
+
+function closeSheet() {
+  sheet.hidden = true;
+  geoMsg.hidden = true;
+}
+
+function byName(a, b) { return a.name.localeCompare(b.name, 'uk'); }
+
+/* Search folding, Ukrainian only. Ignores apostrophes, soft signs and doubled letters, so
+ * "Кам'янець" is found without the apostrophe and a mistyped double letter still matches.
+ *
+ * Deliberately no Russian and no Latin: the interface is Ukrainian, and a half-working
+ * transliteration is worse than none - it answers some queries and silently fails others,
+ * which reads as a broken search rather than a Ukrainian one. */
+function fold(s) {
+  return (s || '').toLowerCase()
+    .replace(/[\u02bc'\u2019`\u02b9]/g, '')
+    .replace(/[ьъ]/g, '')
+    .replace(/(.)\1+/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function matchesQuery(p, q) {
+  return fold(p.name).includes(q);
+}
+
+/* What the list shows right now: either search results across everything, or one level of
+ * the cascade. */
+function currentRows() {
+  const q = fold(placeSearch.value);
+
+  if (q.length >= 2) {
+    /* Oblasts first, then raions, then settlements: the coarser the place, the more likely
+     * it is what a two-letter query meant. */
+    const hits = places
+      .filter(p => matchesQuery(p, q))
+      .sort((a, b) => (a.level === b.level ? byName(a, b) : (a.level === 'oblast' ? -1 : 1)));
+    if (settlements) {
+      for (const row of settlements.settlements) {
+        if (hits.length >= 80) break;
+        if (fold(row[0]).includes(q)) {
+          const p = settlementPlace(row);
+          if (p) hits.push(p);
+        }
+      }
+    } else {
+      loadSettlements().then(renderPlaceList);
+    }
+    return { rows: hits.slice(0, 80), crumbs: null };
+  }
+
+  if (!browse.oblast) {
+    return { rows: places.filter(p => p.level === 'oblast').sort(byName), crumbs: [] };
+  }
+
+  const oblast = places.find(p => p.level === 'oblast'
+    && normaliseOblast(p.oblast) === normaliseOblast(browse.oblast));
+
+  if (!browse.raion) {
+    const rows = places
+      .filter(p => p.level === 'raion' && normaliseOblast(p.oblast) === normaliseOblast(browse.oblast))
+      .sort(byName);
+    return { rows, crumbs: [oblast] };
+  }
+
+  const raion = raionByKey(browse.raion);
+  if (!settlements) {
+    loadSettlements().then(renderPlaceList);
+    return { rows: [], crumbs: [oblast, raion], loading: true };
+  }
+  const idx = settlements.raions.indexOf(browse.raion);
+  const rows = settlements.settlements
+    .filter(r => r[1] === idx)
+    .map(settlementPlace)
+    .filter(Boolean)
+    .sort(byName);
+  return { rows, crumbs: [oblast, raion] };
+}
+
+function renderPlaceList() {
+  document.getElementById('sheet-now').textContent = place.full || place.name;
+
+  const { rows, crumbs, loading } = currentRows();
+
+  /* Breadcrumbs double as the way back up: there is no separate back button, because a
+   * sheet with both is a sheet where neither is obvious. */
+  const crumbBar = document.getElementById('sheet-crumbs');
+  if (!crumbs) {
+    crumbBar.hidden = true;
+  } else {
+    crumbBar.hidden = false;
+    crumbBar.innerHTML = '';
+    const step = (label, onClick) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sheet__crumb';
+      b.textContent = label;
+      b.addEventListener('click', onClick);
+      crumbBar.appendChild(b);
+    };
+    step('Україна', () => { browse = { oblast: null, raion: null }; renderPlaceList(); });
+    if (crumbs[0]) step(crumbs[0].name, () => {
+      browse = { oblast: crumbs[0].oblast, raion: null }; renderPlaceList();
+    });
+    if (crumbs[1]) step(crumbs[1].name, () => renderPlaceList());
+  }
+
+  placeList.innerHTML = '';
+  if (loading) {
+    const li = document.createElement('li');
+    li.className = 'sheet__empty';
+    li.textContent = 'Завантаження населених пунктів…';
+    placeList.appendChild(li);
+    return;
+  }
+  if (!rows.length) {
+    const li = document.createElement('li');
+    li.className = 'sheet__empty';
+    li.textContent = 'Нічого не знайдено';
+    placeList.appendChild(li);
+    return;
+  }
+
+  for (const p of rows) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const chosen = p.key === place.key && p.level === place.level;
+    btn.className = 'sheet__item' + (chosen ? ' sheet__item--on' : '');
+    /* The place's OWN alert, not its oblast's: an oblast can be up while this raion is
+     * not, and a badge that says otherwise is the exact lie this project exists to
+     * remove. */
+    const alerted = alertedAt(p);
+    btn.innerHTML =
+      `<span>${escapeHtml(p.name)}</span>` +
+      (p.level !== 'oblast' && placeSearch.value
+        ? `<span class="sheet__where">${escapeHtml(p.raion || p.oblast.replace(/\s+область$/, ''))}</span>`
+        : '') +
+      (alerted ? '<span class="sheet__alert">тривога</span>' : '') +
+      (hasChildren(p) ? '<span class="sheet__more">›</span>' : '');
+    btn.addEventListener('click', () => {
+      savePlace(p);
+      flyToPlace();
+      if (!hasChildren(p)) { closeSheet(); return; }
+      /* Descend, so the next tap refines. Selection already happened. */
+      browse = p.level === 'oblast'
+        ? { oblast: p.oblast, raion: null }
+        : { oblast: p.oblast, raion: p.key };
+      placeSearch.value = '';
+      renderPlaceList();
+    });
+    li.appendChild(btn);
+    placeList.appendChild(li);
+  }
+}
+
+function flyToPlace() {
+  map.flyTo({ center: [place.lon, place.lat], zoom: place.zoom || 7.2, duration: 800 });
+}
+
+document.getElementById('settings').addEventListener('click', openSheet);
+document.getElementById('sheet-close').addEventListener('click', closeSheet);
+placeSearch.addEventListener('input', renderPlaceList);
+sheet.addEventListener('click', (ev) => { if (ev.target === sheet) closeSheet(); });
+addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && !sheet.hidden) closeSheet(); });
+
+/* --------------------------------------------------------------- geolocation */
+
+/* Asked for only on a tap, never on load, and never with watchPosition: this page is meant
+ * to sit open all night, and continuous positioning would drain the battery it is supposed
+ * to be watched on. Coordinates are used here and thrown away - nothing is sent anywhere. */
+function locate() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('unsupported'));
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve([pos.coords.longitude, pos.coords.latitude]),
+      reject,
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 },
+    );
+  });
+}
+
+let meMarker = null;
+function showMe(lonLat) {
+  if (!meMarker) {
+    const dot = document.createElement('div');
+    dot.className = 'me';
+    meMarker = new maplibregl.Marker({ element: dot }).setLngLat(lonLat).addTo(map);
+  } else {
+    meMarker.setLngLat(lonLat);
+  }
+}
+
+function geoExcuse(err) {
+  if (!navigator.geolocation) return 'Пристрій не вміє визначати місце.';
+  if (err && err.code === 1) return 'Доступ до місця не надано.';
+  if (err && err.code === 3) return 'Не вдалося визначити місце — надто довго.';
+  return 'Не вдалося визначити місце.';
+}
+
+/* The button says "to me", so when it cannot do that it must say why rather than quietly
+ * going somewhere else. */
+document.getElementById('recenter').addEventListener('click', async (ev) => {
+  const btn = ev.currentTarget;
+  btn.setAttribute('aria-busy', 'true');
+  try {
+    const at = await locate();
+    showMe(at);
+    map.flyTo({ center: at, zoom: 9, duration: 800 });
+  } catch (err) {
+    flyToPlace();
+    geoMsg.textContent = geoExcuse(err) + ' Показано вибране місце.';
+    geoMsg.hidden = false;
+    openSheet();
+  } finally {
+    btn.removeAttribute('aria-busy');
+  }
+});
+
+/* Auto-detect resolves the OBLAST exactly, by testing the point against the oblast
+ * polygons the map already has. The raion inside it is then the nearest raion centre,
+ * which is an approximation and can be wrong near a boundary - so the result is shown in
+ * the sheet for the reader to correct, and correcting it always wins. */
+document.getElementById('geo-detect').addEventListener('click', async (ev) => {
+  const btn = ev.currentTarget;
+  btn.setAttribute('aria-busy', 'true');
+  geoMsg.hidden = true;
+  try {
+    const at = await locate();
+    showMe(at);
+    const oblast = oblastAt(at);
+    if (!oblast) {
+      geoMsg.textContent = 'Ви поза межами України — вибір залишився без змін.';
+      geoMsg.hidden = false;
+      return;
+    }
+    const inside = places.filter(p => p.level === 'raion'
+      && normaliseOblast(p.oblast) === normaliseOblast(oblast));
+    const nearest = inside.reduce((best, p) => {
+      const d = (p.lon - at[0]) ** 2 + (p.lat - at[1]) ** 2;
+      return !best || d < best.d ? { p, d } : best;
+    }, null);
+    savePlace(nearest ? nearest.p
+      : places.find(p => p.level === 'oblast' && normaliseOblast(p.oblast) === normaliseOblast(oblast)));
+    flyToPlace();
+    geoMsg.textContent = `Визначено: ${place.full}. Якщо не так — виберіть зі списку.`;
+    geoMsg.hidden = false;
+  } catch (err) {
+    geoMsg.textContent = geoExcuse(err);
+    geoMsg.hidden = false;
+  } finally {
+    btn.removeAttribute('aria-busy');
+  }
 });
 
 /* Coming back from the lock screen: a phone suspends timers and sockets, so without this
@@ -969,6 +1421,22 @@ document.addEventListener('visibilitychange', () => {
 setInterval(fetchStatus, 5000);
 setInterval(paintStatus, 15000);   // keeps the freshness line honest while idle
 setInterval(fetchAlerts, 60000);
+
+/* The catalogue is 39 KB and the headline needs it immediately - a reader whose place is
+ * a raion would otherwise see the default for a moment. So it ships with the page rather
+ * than being fetched when the sheet opens. */
+fetch('places.json?v=748a44ef')
+  .then(r => r.json())
+  .then((list) => {
+    places = list;
+    /* Re-resolve the stored choice against the current catalogue: a raion renamed or
+     * dropped upstream would otherwise stay selected forever and match nothing. */
+    const fresh = places.find(p => p.key === place.key && p.level === place.level);
+    if (fresh) place = fresh;
+    renderPlaceList();
+    paintStatus();
+  })
+  .catch(err => console.warn('places load failed', err));
 
 fetchStatus();
 connect();

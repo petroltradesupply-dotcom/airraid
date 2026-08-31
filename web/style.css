@@ -298,10 +298,18 @@ body {
 }
 
 /* -------------------------------------------------------------------- controls */
-.recenter {
+/* Both map buttons in one stack, so they stay a pair at every screen size instead of two
+   things that happen to be near each other. */
+.mapbtns {
   position: fixed;
   right: calc(var(--right) + 10px);
   bottom: calc(var(--bottom) + 22px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 5;
+}
+.mapbtn {
   width: 42px; height: 42px;
   display: grid; place-items: center;
   border-radius: 50%;
@@ -310,9 +318,129 @@ body {
   color: var(--text);
   cursor: pointer;
   backdrop-filter: blur(8px);
-  z-index: 5;
 }
-.recenter:active { background: var(--line); }
+.mapbtn:active { background: var(--line); }
+.mapbtn[aria-busy="true"] { opacity: .55; }
+
+/* Where you are. Small and blue on purpose: it must not compete with a threat marker for
+   attention, it is only the anchor for the "to me" button. */
+.me {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #4d9fff;
+  border: 2px solid #dce9ff;
+  box-shadow: 0 0 0 4px rgba(77,159,255,.22);
+}
+
+/* ------------------------------------------------------------------- settings sheet */
+/* A sheet from the bottom on a phone, a centred panel on a wide screen. Same markup: the
+   difference is entirely in where this block pins it. */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(8,10,19,.55);
+  backdrop-filter: blur(2px);
+}
+.sheet[hidden] { display: none; }
+
+.sheet__panel {
+  width: 100%;
+  max-width: 520px;
+  max-height: 82dvh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px calc(var(--right) + 16px) calc(var(--bottom) + 16px) calc(var(--left) + 16px);
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  border-radius: 16px 16px 0 0;
+}
+
+.sheet__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.sheet__title { font-size: 17px; font-weight: 650; }
+.sheet__now { margin-top: 2px; color: var(--text-dim); font-size: 13px; }
+.sheet__x {
+  flex: 0 0 auto;
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sheet__geo, .sheet__search {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: rgba(17,19,31,.6);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.sheet__geo { text-align: left; cursor: pointer; }
+.sheet__geo:active { background: var(--line); }
+.sheet__search::placeholder { color: var(--text-dim); }
+
+.sheet__msg { color: var(--watch); font-size: 12.5px; line-height: 1.35; }
+.sheet__msg[hidden] { display: none; }
+
+.sheet__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0; padding: 0;
+  list-style: none;
+  -webkit-overflow-scrolling: touch;
+}
+.sheet__item {
+  width: 100%;
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 10px 12px;
+  border: 0; border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit; font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.sheet__item:active { background: var(--line); }
+.sheet__item--on { background: rgba(255,45,85,.12); }
+.sheet__where { color: var(--text-dim); font-size: 12px; }
+.sheet__alert { margin-left: auto; color: var(--alarm); font-size: 12px; }
+
+.sheet__note { margin: 0; color: var(--text-dim); font-size: 11.5px; line-height: 1.4; }
+
+/* Breadcrumbs are also the way back up. A sheet with breadcrumbs AND a back button is a
+   sheet where neither is obvious. */
+.sheet__crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.sheet__crumbs[hidden] { display: none; }
+.sheet__crumb {
+  padding: 3px 7px;
+  border: 0; border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit; font-size: 12.5px;
+  cursor: pointer;
+}
+.sheet__crumb:not(:last-child)::after { content: ' ›'; opacity: .55; }
+.sheet__crumb:last-child { color: var(--text); }
+
+.sheet__more { margin-left: auto; color: var(--text-dim); font-size: 15px; line-height: 1; }
+/* When both a badge and a chevron are present the badge owns the auto margin. */
+.sheet__alert + .sheet__more { margin-left: 8px; }
+.sheet__empty { padding: 14px 12px; color: var(--text-dim); font-size: 13px; }
+
+@media (min-width: 620px) and (min-height: 560px) {
+  .sheet { align-items: center; }
+  .sheet__panel { border-radius: 16px; border: 1px solid var(--line); max-height: 76dvh; }
+}
 
 .attrib {
   position: fixed;
