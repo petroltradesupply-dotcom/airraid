@@ -24,6 +24,31 @@ const KYIV = [30.5234, 50.4501];
  * 22.14..40.23 east, 44.39..52.37 north. The map opens fitted to this on every screen, so
  * the first thing anyone sees is all of Ukraine - phone, tablet or desktop - instead of a
  * fixed zoom that frames it on one of them and crops it on the others. */
+/* The colour an air-raid alert paints, and how densely.
+ *
+ * Both layers read these, because an oblast-wide alert and a single alerted raion must be
+ * the same red - with two literals they drifted apart once already.
+ *
+ * Chosen by rendering six candidates on live data and looking at them side by side. What
+ * the arithmetic showed, and what settled it: the old #ff2d55 is a pink crimson, and over
+ * this map's #1b1f31 ground at 0.13 it blends to #392136 - a cherry burgundy only 1.6x
+ * brighter than the ground, which reads as decoration rather than alarm. Raising the
+ * density alone does not fix it: the same hue at 0.22 is still magenta.
+ *
+ * #ff3b30 at 0.22 blends to #4d2531, 2.2x the ground. Two candidates measured brighter and
+ * both were rejected: pure #ff1a1a has too little blue and goes dull on a navy ground
+ * (1.9x, the worst of the dense group), and #ff4d2e at 2.4x drifts orange, which is already
+ * the legend's colour for Ракети and КАБ.
+ */
+const ALERT_RED = '#ff3b30';
+const ALERT_FILL = 0.22;
+
+/* The panel keeps its own red, --alarm #ff2d55, and so does the Балістика legend icon. Not
+ * an oversight and not drift: they were looked at side by side against this fill and kept
+ * deliberately. They are type and iconography at full opacity, where the pink crimson is
+ * sharp and reads well; this is a wash over a map, where the same hue goes cherry. Two reds
+ * with two jobs - do not "fix" one to match the other without looking at both. */
+
 const UKRAINE_BOUNDS = [[22.14, 44.39], [40.23, 52.37]];
 
 /* Room for the things that float over the map, so the country is not fitted underneath
@@ -386,11 +411,11 @@ async function addOblastLayer() {
       type: 'fill',
       source: 'oblasts',
       paint: {
-        'fill-color': ['case', ['boolean', ['feature-state', 'alert'], false], '#ff2d55', '#000000'],
-        /* The same 0.13 a raion gets. Red has to mean one thing: with the oblast at 0.10 an
+        'fill-color': ['case', ['boolean', ['feature-state', 'alert'], false], ALERT_RED, '#000000'],
+        /* The same density a raion gets. Red has to mean one thing: with the oblast lower an
          * oblast-wide alert looked milder than a single alerted raion next to it, which is
          * backwards. */
-        'fill-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.13, 0],
+        'fill-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], ALERT_FILL, 0],
       },
     });
     map.addLayer({
@@ -562,11 +587,8 @@ async function addRaionLayer() {
       type: 'fill',
       source: 'raions',
       paint: {
-        'fill-color': '#ff2d55',
-        /* A shade stronger than the 0.10 an alerted oblast gets. A raion is a fraction of
-         * the area, and at country zoom the same opacity on a smaller patch reads as
-         * fainter than it is. */
-        'fill-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.13, 0],
+        'fill-color': ALERT_RED,
+        'fill-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], ALERT_FILL, 0],
       },
     }, under);
 
