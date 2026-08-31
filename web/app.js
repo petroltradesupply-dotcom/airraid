@@ -763,26 +763,43 @@ function plausible(threat) {
     && lat >= PLAUSIBLE.south && lat <= PLAUSIBLE.north;
 }
 
-/* THERE IS NO RULE HERE THAT HIDES A TARGET BECAUSE ITS REGION IS QUIET, and the reason is
- * worth keeping so nobody adds one again.
+/* A target over a region whose alert has been lifted is a leftover, and the page stops
+ * drawing it.
  *
- * The idea is compelling: a target over a region with no alert cannot exist, because the
- * target is why the alert is declared. It shipped on 2026-09-01 and was reverted the same
- * night, because the data says otherwise.
+ * The all-clear is the authoritative statement that the sky over that region is clear. The
+ * aggregator does not act on it: measured on 2026-09-01, the Kyiv and Kyivska alerts ended
+ * at 21:14:48 UTC and a snapshot at 21:17:57 - three minutes later - still carried six drone
+ * tracks over Kyiv city and Kyiv oblast, at Lisovyi Masyv, Pechersk, Zhuliany, Brovary and
+ * Velyka Dymerka. Every one of them had been confirmed at 21:06-21:09, BEFORE the all-clear.
+ * Not one had been removed. So they are stale by the only clock that matters, and a marker
+ * over a cleared city contradicts the panel above it.
  *
- * Measured while it was live, with 11 of 27 subjects alerted: it was hiding seven tracks -
- * six drones over Kyiv city and Kyiv oblast, at Lisovyi Masyv, Pechersk, Zhuliany, Brovary
- * and Velyka Dymerka, two of them lifecycle=confirmed. Their ages were 9 to 12 minutes,
- * inside the 8.5-to-14-minute range of every track it was still drawing. Not ghosts. Real,
- * fresh, confirmed drones over the reader's own oblast, erased from the map.
+ * FPV IS EXEMPT, and that is the whole reason this is a set rather than a blanket rule. An
+ * FPV drone is small, flies a few kilometres near the line of contact, and no air-raid alert
+ * is declared for one at all - so a quiet region with an FPV over it is not a contradiction,
+ * it is the normal case. Hiding those would erase the only warning there is.
  *
- * The all-clear is given when the danger to the population is judged over, not when the last
- * drone has left the sky - and FPV drones, being small and close to the line, get no alert
- * declared for them at all. So a quiet region with a target over it is an ordinary state of
- * the world, not a contradiction.
+ * Three further exemptions, each of them "we do not know" rather than "it is quiet": a track
+ * the feed gives no region for and whose coordinates fall in no oblast - over the sea, or
+ * just across the border; and every track while status.json is missing, because a dead
+ * daemon must never empty the map.
  *
- * Ghost tracks are handled where the evidence actually points: the ballistic TTL below, and
- * the plausibility box above. */
+ * An earlier version of this rule was shipped without the FPV exemption and reverted within
+ * the hour. Adding a class to this set needs the same thing FPV had: a reason why an alert is
+ * not declared for it. */
+const ALERT_EXEMPT = new Set(['fpv']);
+
+function underAlert(threat) {
+  if (ALERT_EXEMPT.has(threat.type)) return true;
+  if (!status || !status.regions) return true;      // no official picture: hide nothing
+  const named = threat.region ? regionFor(threat.region) : null;
+  if (named) return Boolean(named.alert);
+  const here = (Number.isFinite(threat.lon) && Number.isFinite(threat.lat))
+    ? oblastAt([threat.lon, threat.lat]) : null;
+  if (!here) return true;                            // outside Ukraine, or unplaceable
+  const found = regionFor(here);
+  return found ? Boolean(found.alert) : true;
+}
 
 /** Forget tracks the feed has stopped mentioning. Called from the frame loop. */
 function expireTracks(now) {
@@ -1032,7 +1049,7 @@ function render() {
   for (const [id, threat] of threats) {
     counts[threat.type] = (counts[threat.type] || 0) + 1;
 
-    if (hidden.has(threat.type)) {
+    if (hidden.has(threat.type) || !underAlert(threat)) {
       const existing = markers.get(id);
       if (existing) { existing.marker.remove(); markers.delete(id); }
       continue;
