@@ -213,7 +213,11 @@ function predict(threat, nowMs) {
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: 'map-style.json',
+  /* Versioned like every other asset. These three are fetched from here rather than from
+   * index.html, and nginx caches .geojson for a day - so a regenerated boundary or mask
+   * would sit invisible behind the cache. tools/check_web.py verifies these hashes too,
+   * which is the only reason they can be trusted to be right. */
+  style: 'map-style.json?v=457dfc20',
   center: KYIV,
   zoom: 5.6,
   minZoom: 4,
@@ -252,8 +256,12 @@ map.on('styleimagemissing', (e) => {
  * anything. */
 async function addOblastLayer() {
   try {
-    const geo = await fetch('oblasts.geojson').then(r => r.json());
+    const geo = await fetch('oblasts.geojson?v=211a6dae').then(r => r.json());
     map.addSource('oblasts', { type: 'geojson', data: geo });
+    map.addSource('oblast-labels', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+    });
     map.addLayer({
       id: 'oblast-alert-fill',
       type: 'fill',
@@ -273,12 +281,101 @@ async function addOblastLayer() {
         'line-opacity': ['case', ['boolean', ['feature-state', 'alert'], false], 0.75, 0.5],
       },
     });
+    /* Our own oblast names, replacing upstream's `place_state`.
+     *
+     * That layer was dropped from the style because it labels Bryansk and Lipetsk from the
+     * same source as Kyivska, and the tile schema carries no country code on region
+     * points - so it was all of them or none. Drawing them here from the boundaries we
+     * already load costs nothing extra and buys the handover: oblast names while the whole
+     * country is in view, gone once the map is close enough for city names to take over.
+     *
+     * Labelled from a separate point source rather than the polygons themselves. On a
+     * polygon source MapLibre places one label per part of a MultiPolygon, and half these
+     * oblasts are split by islands or river channels - Kherson came out labelled twice.
+     * One point per oblast, on its largest part, is the only way to get one label. */
+    /* Below the settlement labels, and that placement is load-bearing.
+     *
+     * MapLibre resolves label collisions in layer order and the LATER layer wins. With this
+     * layer on top, measured across zooms, "Київ" vanished at z6.0 and z6.5 - the oblast
+     * name took its spot at exactly the zoom where the whole country is in view and finding
+     * the capital matters most. Placed underneath, the city always wins and oblast names
+     * simply thin out where it is crowded, which is the right trade. */
+    /* Everything outside Ukraine, muted.
+     *
+     * The point is not decoration: at this scale the map carries Bryansk roads, Belarusian
+     * towns and Russian region names with equal weight to Kyiv oblast, and none of that is
+     * what the page is for. Per-layer filters cannot express it - the tile schema has no
+     * country code on a settlement point - so the honest tool is a mask.
+     *
+     * Above the base map and below the labels of OUR OWN layers, so foreign names dim with
+     * the ground while oblast names, targets and the alert shading stay crisp. */
+    const mask = await fetch('ukraine-mask.geojson?v=cb8639e1').then(r => r.json());
+    map.addSource('outside', { type: 'geojson', data: mask });
+    map.addLayer({
+      id: 'outside-dim',
+      type: 'fill',
+      source: 'outside',
+      paint: {
+        /* Darker than the page background, and deliberately not black.
+         *
+         * Computed rather than eyeballed. Against Ukraine's ground (#1b1f31, luminance
+         * 31.4) this pair puts the outside at 15.2 - a 2.07x difference, twice what the
+         * first attempt at 0.55 over the background colour managed. The background colour
+         * was the wrong paint: it sits so close to the ground that even full opacity caps
+         * out at 1.5x.
+         *
+         * Black at 0.7 would give 3.3x, and that is too much: the neighbours lose their
+         * geography entirely, and the point of keeping them visible is knowing where
+         * Ukraine sits among them. */
+        'fill-color': '#090b13',
+        'fill-opacity': 0.8,
+      },
+    });
+
+    /* Specifically the first SETTLEMENT label layer, not the first symbol layer - that one
+     * is water_name, and slipping underneath it would let a river name outrank an oblast. */
+    const firstPlaceLayer = map.getStyle().layers.find(l => l.id.startsWith('place_'))?.id;
+    map.addLayer({
+      id: 'oblast-label',
+      type: 'symbol',
+      source: 'oblast-labels',
+      maxzoom: 8,
+      layout: {
+        'text-field': ['get', 'label'],
+        'text-font': ['Noto Sans Regular'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 4, 9, 7, 12],
+        'text-transform': 'uppercase',
+        'text-letter-spacing': 0.08,
+        'text-max-width': 8,
+        'text-padding': 4,
+      },
+      paint: {
+        'text-color': ['case', ['boolean', ['feature-state', 'alert'], false],
+                       '#e8879b', '#8990a6'],
+        'text-halo-color': '#11131f',
+        'text-halo-width': 1.2,
+      },
+    }, firstPlaceLayer);
+
     /* MapLibre feature-state needs a stable id per feature; the file has none, so index
      * by position and keep a name -> index map for the alert updates. */
     geo.features.forEach((f, i) => {
       f.id = i;
       const name = normaliseOblast(f.properties.region || f.properties.key || '');
       oblastIndex.set(name, i);
+
+      /* "ВІННИЦЬКА ОБЛАСТЬ" is twice the width it needs to be at this size, and the word
+       * "область" carries nothing - every shape here is one. Kyiv city gets no label at
+       * all: the map already names it, from the place layer, and two labels on the same
+       * dot is worse than one. */
+      const region = f.properties.region || '';
+      if (region.endsWith(' область')) {
+        f.properties.label = region.slice(0, -' область'.length);
+      } else if (region.startsWith('Автономна Республіка')) {
+        f.properties.label = 'Крим';
+      } else if (region) {
+        f.properties.label = region;
+      }
       /* The file carries Kyiv city and Kyiv oblast as separate shapes, which is exactly
        * the pair the status line needs: roughly a fifth of Neptun's tracks arrive with no
        * `region` at all, and for those the geometry is the only way to tell whether the
@@ -286,10 +383,47 @@ async function addOblastLayer() {
       if (name === 'київ' || name === 'київська') kyivShapes.push(f.geometry);
     });
     map.getSource('oblasts').setData(geo);
+    map.getSource('oblast-labels').setData({
+      type: 'FeatureCollection',
+      features: geo.features
+        .filter(f => f.properties.label)
+        .map(f => ({
+          type: 'Feature',
+          id: f.id,
+          properties: { label: f.properties.label },
+          geometry: { type: 'Point', coordinates: labelPoint(f.geometry) },
+        })),
+    });
     applyAlerts();
   } catch (err) {
     console.warn('oblast layer failed', err);
   }
+}
+
+/* Where to put an oblast's single label: the centre of its largest ring.
+ *
+ * The centre of the bounding box, not the centroid - for a shape like Odesa oblast the
+ * true centroid can land in the sea, and a name floating offshore reads as a mistake. The
+ * largest ring is picked by bounding-box area, which is enough to tell a mainland from an
+ * island and costs one pass. */
+function labelPoint(geom) {
+  const rings = geom.type === 'MultiPolygon'
+    ? geom.coordinates.map(poly => poly[0])
+    : [geom.coordinates[0]];
+
+  let best = null, bestArea = -1;
+  for (const ring of rings) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of ring) {
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+    const area = (maxX - minX) * (maxY - minY);
+    if (area > bestArea) { bestArea = area; best = [(minX + maxX) / 2, (minY + maxY) / 2]; }
+  }
+  return best;
 }
 
 const oblastIndex = new Map();
@@ -694,7 +828,13 @@ function setAlerts(data) {
 function applyAlerts() {
   if (!mapReady || !map.getSource('oblasts')) return;
   for (const [name, id] of oblastIndex) {
-    map.setFeatureState({ source: 'oblasts', id }, { alert: alertedOblasts.has(name) });
+    const alert = alertedOblasts.has(name);
+    map.setFeatureState({ source: 'oblasts', id }, { alert });
+    /* The label lives on its own source, so its feature-state is a separate write - miss
+     * this and the outline turns red while its name stays grey. */
+    if (map.getSource('oblast-labels')) {
+      map.setFeatureState({ source: 'oblast-labels', id }, { alert });
+    }
   }
 }
 

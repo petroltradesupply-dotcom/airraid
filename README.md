@@ -54,8 +54,10 @@ web/                the page - no build step, no bundler, no framework
   style.css         dark theme, phone and desktop layouts
   map-style.json    MapLibre style, generated, recoloured to the dark navy palette
   maplibre-gl.*     vendored so the page does not depend on a CDN
-  oblasts.geojson   oblast boundaries, used for the alert shading and for deciding
-                    whether a track without a region is over Kyiv
+  oblasts.geojson   oblast boundaries: alert shading, oblast names, and deciding whether
+                    a track that arrived without a region is over Kyiv
+  ukraine-mask.geojson  the world with Ukraine as a hole, generated - dims everything
+                    outside the country
 docker-compose.yml  the container that serves it
 nginx.conf          gzip, cache policy, MIME types the browser insists on
 tools/              asset generators and the integrity checker
@@ -92,7 +94,14 @@ alongside a syntax check of `app.js`.
 ```sh
 python3 tools/make_map_style.py     # fetch the upstream style and recolour it
 python3 tools/make_icons.py         # render the PWA icon set
+python3 tools/make_mask.py          # union the oblasts into the outside-Ukraine mask
 ```
 
-After changing anything under `web/`, update the `?v=` hash in `index.html` to the first
-eight characters of the file's SHA-1 — `check_web.py` will tell you if you forget.
+`make_mask.py` needs `shapely`; nothing at runtime does.
+
+After changing anything under `web/`, update its `?v=` hash to the first eight characters
+of the file's SHA-1 — in `index.html` for the script and stylesheet, and in `app.js` for
+`map-style.json`, `oblasts.geojson` and `ukraine-mask.geojson`, which the page fetches
+itself. `check_web.py` checks both places and will tell you if you forget. It is worth
+forgetting once to see why: nginx caches these for a day, so the fix ships and stays
+invisible.

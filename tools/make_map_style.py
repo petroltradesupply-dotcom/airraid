@@ -133,6 +133,20 @@ def build() -> dict:
     style["name"] = "Air Raid"
     style["layers"] = [_repaint(layer) for layer in style["layers"]]
 
+    # Two upstream layers are dropped outright.
+    #
+    # `boundary_state` draws admin_level=4 for the whole planet - which inside Ukraine
+    # duplicates the oblast outlines this project already draws from its own GeoJSON, and
+    # outside Ukraine adds Bryansk, Lipetsk and every other region as pure noise. The tile
+    # schema carries no country code on those lines, so there is nothing to filter on:
+    # either all of them or none, and none is right.
+    #
+    # `place_state` is the same problem for labels. Dropping it costs the Ukrainian oblast
+    # names too, which is why this project draws its own from the same GeoJSON - and gains
+    # exact control over the zoom at which they hand over to city names.
+    DROP = {"boundary_state", "place_state"}
+    style["layers"] = [layer for layer in style["layers"] if layer["id"] not in DROP]
+
     # The shaded-relief raster carries its own colour and fights the flat palette.
     style["layers"] = [
         layer for layer in style["layers"]

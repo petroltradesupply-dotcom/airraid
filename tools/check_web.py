@@ -58,6 +58,22 @@ def check() -> list[str]:
                     " - браузери віддаватимуть стару версію з кешу"
                 )
 
+    # Assets the page pulls from app.js rather than from index.html. nginx caches
+    # .geojson for a day, so a stale hash here is the same invisible failure as in the
+    # markup - and it is easier to forget, because nothing in index.html mentions them.
+    js = WEB / "app.js"
+    if js.exists():
+        for ref, stamp in re.findall(r"['\"]([A-Za-z0-9._/-]+\.(?:json|geojson))\?v=([0-9a-f]+)['\"]",
+                                     js.read_text(encoding="utf-8")):
+            target = WEB / ref
+            if not target.exists():
+                problems.append(f"app.js посилається на {ref}, якого немає")
+            elif digest(target) != stamp:
+                problems.append(
+                    f"{ref}: у app.js ?v={stamp}, а вміст дає {digest(target)}"
+                    " - браузери віддаватимуть стару версію з кешу"
+                )
+
     for name in ("manifest.webmanifest", "map-style.json", "oblasts.geojson"):
         path = WEB / name
         if not path.exists():

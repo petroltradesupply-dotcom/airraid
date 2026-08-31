@@ -84,6 +84,43 @@ The result is memoised per track and invalidated when its position or timestamp 
 The oblast outline runs to thousands of points and must never be walked inside an
 animation frame.
 
+## Making Ukraine the subject
+
+At this scale the base map gives Bryansk roads, Belarusian towns and Russian region names
+the same weight as Kyiv oblast. Three changes fix that, and only the first is obvious.
+
+**Foreign region boundaries and names are dropped from the style outright** —
+`boundary_state` and `place_state`. There is nothing to filter on: the tile schema carries
+no country code on a region line or a region point, so it is all of them or none. None is
+right, because the oblast outlines inside Ukraine are already drawn from this project's own
+GeoJSON, and the Ukrainian oblast *names* are now drawn from it too.
+
+**Those names come from a separate point source**, one point per oblast on its largest
+part. Labelled straight off the polygons, MapLibre places one label per part of a
+MultiPolygon and half these oblasts are split by islands or river channels - Kherson came
+out labelled twice. The layer sits *below* the settlement labels: collisions resolve in
+layer order and the later layer wins, so with it on top "Київ" vanished at z6.0 and z6.5,
+exactly where the whole country is in view and finding the capital matters most.
+
+**Everything outside is dimmed by a mask** - the world as one polygon with Ukraine as a
+single hole, drawn above the labels so foreign names dim along with the ground while
+Ukraine's stay crisp. Two things about it are easy to get wrong, and both were:
+
+- *Skipping the union.* The world with each of the 27 oblasts as its own hole looks like it
+  should work and does not. MapLibre clips a GeoJSON source into tiles and triangulates
+  each tile separately; holes that share an edge break that triangulation, giving
+  rectangular blocks across the map and a country dimmed along with everything else.
+- *Winding order.* The vector tile format tells an outer ring from a hole by the direction
+  it is traced, and shapely guarantees nothing about it. The difference came out inverted -
+  world clockwise, Ukraine counter-clockwise - so the hole was read as a second solid
+  polygon and filled the country in.
+
+The paint is `#090b13` at 0.8, chosen by computing the result rather than nudging it: that
+puts the outside at luminance 15 against Ukraine's 32, a 2.2x separation. The page
+background colour was the wrong paint - it sits so close to the ground colour that even
+full opacity caps out at 1.5x. Black would reach 3.3x and take the neighbours' geography
+with it, which defeats the point of keeping them visible.
+
 ## Things that turned out to matter
 
 **iOS standalone height.** With `apple-mobile-web-app-status-bar-style=black-translucent`
