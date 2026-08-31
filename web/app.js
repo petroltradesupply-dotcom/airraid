@@ -898,9 +898,17 @@ const el = {
  * "Балістичної загрози немає" in green while a siren was running over the city, which
  * read as reassurance at the exact moment reassurance was wrong.
  *
- * Line two: is any of it ballistic. Absent when it is not - silence is the honest answer
- * and it keeps the panel quiet on the ~11 ordinary alerts a week. Yellow for a
- * declaration, bright red and pulsing only for ballistics aimed at Kyiv.
+ * Line two: is any of it ballistic, HERE. Absent when it is not - silence is the honest
+ * answer and it keeps the panel quiet on the ~11 ordinary alerts a week.
+ *
+ *     red, pulsing   the Air Force named your region and the siren is on here
+ *     yellow         a ballistic declaration that can reach you
+ *     white          what is actually flying over your place
+ *
+ * The distinction between red and yellow is the distinction between "at you" and "in the
+ * air somewhere that includes you". 57 % of ballistic declarations name no place at all,
+ * so treating them as "at you" would turn most of them red and the colour would stop
+ * meaning anything.
  *
  * The reason text ("ракета на Одесу") is gone on purpose: a launch at another city is
  * not information this page exists to carry. */
@@ -923,13 +931,35 @@ function paintStatus() {
       alerted = placeAlerted();
       headline = placeHeadline();
 
-      if (status.state === 'alarm') {
+      const region = regionFor(place.oblast);
+      const ballistic = region ? region.ballistic : null;
+
+      /* The engine's own verdict still wins for Kyiv, and that is not favouritism: it
+       * carries suppression the per-region watch does not - it goes quiet when every
+       * located ballistic track sits over Donetsk. Where it speaks, it is the better
+       * answer; elsewhere the watch is the only one. */
+      const engineFired = status.state === 'alarm' && isKyivPlace();
+
+      if (status.degraded && (alerted || engineFired)) {
         cls = 'alarm';
         subCls = 'alarm';
-        /* No "take cover" here: an alert already means take cover, so the words add
+        sub = 'ФІЛЬТР НЕ ПРАЦЮЄ — ТИП НЕВІДОМИЙ';
+      } else if (engineFired || (ballistic === 'named' && alerted)) {
+        cls = 'alarm';
+        subCls = 'alarm';
+        /* "в повітрі", not "загроза": a named declaration means the Air Force reported an
+         * actual missile, while a placeless one says only that ballistic weapons may be
+         * used. Calling both a threat would waste the distinction; calling both a launch
+         * would claim something they did not say.
+         *
+         * No "take cover" either - an alert already means take cover, so the words add
          * nothing and cost the line its bluntness. The pulse is the instruction. */
-        sub = status.degraded ? 'ФІЛЬТР НЕ ПРАЦЮЄ — ТИП НЕВІДОМИЙ' : 'Балістика на Київ';
-      } else if (status.state === 'armed') {
+        sub = 'Балістика в повітрі';
+      } else if (ballistic) {
+        cls = 'watch';
+        subCls = 'watch';
+        sub = 'Загроза балістики';
+      } else if (status.state === 'armed' && isKyivPlace()) {
         cls = 'watch';
         subCls = 'watch';
         /* Only say "ballistic" when a ballistic marker is what armed it. A missile or
@@ -942,7 +972,7 @@ function paintStatus() {
         cls = alerted ? 'alert' : 'calm';
         /* Nothing ballistic to report, so the line is free for the question a person asks
          * next: what is actually up there. Only during an alert - listing tracks while the
-         * city is quiet would be trivia. */
+         * place is quiet would be trivia. */
         if (alerted) { sub = placeComposition(); subCls = sub ? 'info' : ''; }
       }
     }
@@ -1042,6 +1072,13 @@ function alertedAt(p) {
 
 function placeAlerted() {
   return alertedAt(place);
+}
+
+/* Does the chosen place sit under the engine's own verdict? The engine only computes Kyiv,
+ * so this is what decides whether its `state` may be read at all. */
+function isKyivPlace() {
+  const o = normaliseOblast(place.oblast);
+  return o === 'київ' || o === 'київська';
 }
 
 /* Is this track over the chosen place?

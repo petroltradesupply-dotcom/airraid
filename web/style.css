@@ -135,6 +135,10 @@ body {
   text-align: right;
 }
 .status__row { display: contents; }
+/* `hidden` alone does nothing here: the browser implements it as `display: none` in its own
+   stylesheet, and any author rule - including `display: contents` above - outranks that.
+   The DOM said hidden while the pixels said otherwise, which is why this needs saying. */
+.status__row[hidden] { display: none; }
 .status__label { color: var(--text-dim); text-align: left; }
 .status__row--muted span { color: var(--text-dim); }
 
